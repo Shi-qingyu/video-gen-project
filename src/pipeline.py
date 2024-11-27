@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 
 from diffusers.pipelines.cogvideo.pipeline_cogvideox import CogVideoXPipeline, retrieve_timesteps
+from diffusers.schedulers.scheduling_dpm_cogvideox import CogVideoXDPMScheduler
 from diffusers.pipelines.cogvideo.pipeline_output import CogVideoXPipelineOutput
 from diffusers.callbacks import MultiPipelineCallbacks, PipelineCallback
 

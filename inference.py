@@ -6,7 +6,7 @@ from diffusers.utils import export_to_video
 
 from moft.motion_embedding import inject_and_load_motion_embedding
 
-prompt = "A tank was driving through the desert."
+prompt = "A cat and a dog is walking on the beach."
 seed = 42
 
 pipe = CogVideoXPipeline.from_pretrained(
@@ -14,14 +14,14 @@ pipe = CogVideoXPipeline.from_pretrained(
     torch_dtype=torch.bfloat16
 )
 
-inject_and_load_motion_embedding(
-    pipe.transformer, 
-    ckpt_path="results_lr_5e-4_v3/checkpoint-400/motion_embedding.pth", 
-    version="v3",
-    train=True
-)
+# inject_and_load_motion_embedding(
+#     pipe.transformer, 
+#     ckpt_path="results_lr_5e-4_v3/checkpoint-400/motion_embedding.pth", 
+#     version="v3",
+#     train=True
+# )
 
-pipe.to("cuda:0")
+pipe.to("cuda")
 pipe.vae.enable_tiling()
 
 # lora_scaling = 128 / 128
@@ -37,9 +37,9 @@ video = pipe(
     generator=torch.Generator(device="cuda").manual_seed(seed),
 ).frames[0]
 
-prompt = prompt.replace(" ", "_")[:-1]
-save_dir = os.path.join("output_videos", prompt)
-os.makedirs(save_dir, exist_ok=True)
-save_path = os.path.join(save_dir, f"v3_400_lr_5e-4_w_app_{seed}.mp4")
+# prompt = prompt.replace(" ", "_")[:-1]
+# save_dir = os.path.join("output_videos", prompt)
+# os.makedirs(save_dir, exist_ok=True)
+# save_path = os.path.join(save_dir, f"v3_400_lr_5e-4_w_app_{seed}.mp4")
 
-export_to_video(video, save_path, fps=8)
+export_to_video(video, "test_origin.mp4", fps=8)

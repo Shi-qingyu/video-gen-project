@@ -37,9 +37,10 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
             if query_length == height * width:
                 video_mask = torch.zeros(size=(height, width), dtype=torch.float32)
                 video_mask[y1: y2, x1: x2] = 1
-                video_mask = video_mask.flatten()[..., None].repeat(1, word_len)
+                video_mask_ = video_mask.flatten()[..., None].repeat(1, word_len)
+                video_mask_ = (1 - video_mask_) * (-1e8) + 20
 
-                attention_mask[:, word_idx: word_idx+word_len] = video_mask
+                attention_mask[:, word_idx: word_idx+word_len] = video_mask_
 
             elif query_length <= height * width:
                 video_mask = torch.zeros(size=(num_frames, height, width), dtype=torch.float32)
@@ -48,9 +49,12 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
                 attention_mask[word_idx: word_idx+word_len, 226:] = video_mask
 
         if query_length == height * width:
-            attention_mask[:, :226] = torch.where(attention_mask[:, :226].bool(), 9, -1e8)
+            pos_in_bbox = video_mask[:, 0].bool()
+            attention_mask[pos_in_bbox, :word_idx] = -1e8
+            attention_mask[pos_in_bbox, word_idx+word_len:] = -1e8
+            # attention_mask[:, :226] = torch.where(attention_mask[:, :226].bool(), 20, -1e8)
         else:
-            attention_mask[:, 226:] = torch.where(attention_mask[:, 226:].bool(), 9, -1e8)
+            attention_mask[:, 226:] = torch.where(attention_mask[:, 226:].bool(), 20, -1e8)
 
         attention_mask = attention_mask[None].repeat(batch_size * head_size, 1, 1)
 
@@ -62,6 +66,7 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
         attn: Attention,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
+        attention_mask: torch.Tensor = None,
         image_rotary_emb: torch.Tensor = None,
         word_ids: list = None,
         word_lens: list = None,
