@@ -1,6 +1,6 @@
-./results
-./outputs
-./data
+/results/
+/outputs/
+/data/
 
 .vscode
 ./__pycache__
