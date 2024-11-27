@@ -2,7 +2,7 @@ from src.pipeline import MyCogVideoXPipeline
 from src.transformer import MyCogVideoXTransformer3DModel
 
 import torch
-
+from diffusers.utils import export_to_video
 
 prompt = "A cat and a dog is walking on the beach."
 words = ["cat", "dog"]
@@ -34,3 +34,5 @@ video = pipe(
     guidance_scale=6,
     generator=torch.Generator(device="cuda").manual_seed(42),
 ).frames[0]
+
+export_to_video(video, "test.mp4", fps=8)
