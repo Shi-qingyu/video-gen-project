@@ -14,24 +14,61 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
     def prepare_attention_mask(
         self,
         attn: Attention,
-        attention_mask: torch.Tensor,
-        sequence_length: int,
+        word_ids: list,
+        word_lens: list,
+        bboxes: torch.Tensor,
+        height: int,
+        width: int,
+        num_frames: int,
+        query_length: int,
         batch_size: int,
     ):
         head_size = attn.heads
-        if attention_mask is None:
-            return None
-        
-        
-        
 
+        attention_mask = torch.zeros(
+            size=(query_length, 226 + num_frames * height * width),
+            dtype=torch.float32
+        )
+
+        for word_idx, word_len, bbox in zip(word_ids, word_lens, bboxes):
+            x1, x2 = [int(x) for x in bbox[::2] * width]
+            y1, y2 = [int(y) for y in bbox[1::2] * height]
+            
+            if query_length == height * width:
+                video_mask = torch.zeros(size=(height, width), dtype=torch.float32)
+                video_mask[y1: y2, x1: x2] = 1
+                video_mask = video_mask.flatten()[..., None].repeat(1, word_len)
+
+                attention_mask[:, word_idx: word_idx+word_len] = video_mask
+
+            elif query_length <= height * width:
+                video_mask = torch.zeros(size=(num_frames, height, width), dtype=torch.float32)
+                video_mask[:, bbox[1]: bbox[3], bbox[0]: bbox[2]] = 1
+                video_mask = video_mask.flatten()[None].repeat(word_len, 1)
+                attention_mask[word_idx: word_idx+word_len, 226:] = video_mask
+
+        if query_length == height * width:
+            attention_mask[:, :226] = torch.where(attention_mask[:, :226].bool(), 9, -1e8)
+        else:
+            attention_mask[:, 226:] = torch.where(attention_mask[:, 226:].bool(), 9, -1e8)
+
+        attention_mask = attention_mask[None].repeat(batch_size * head_size, 1, 1)
+
+        return attention_mask
+        
+        
     def __call__(
         self,
         attn: Attention,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
-        attention_mask: torch.Tensor = None,
         image_rotary_emb: torch.Tensor = None,
+        word_ids: list = None,
+        word_lens: list = None,
+        bboxes: torch.Tensor = None,
+        height: int = None,
+        width: int = None,
+        num_frames: int = None,
     ):
         text_seq_length = encoder_hidden_states.size(1)
 
@@ -40,10 +77,6 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
         batch_size, sequence_length, _ = (
             hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
         )
-
-        if attention_mask is not None:
-            attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
-            attention_mask = attention_mask.view(batch_size, attn.heads, -1, attention_mask.shape[-1])
 
         query = attn.to_q(hidden_states)
         key = attn.to_k(hidden_states)
@@ -82,6 +115,22 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
         for idx in block_ids:
             end_idx = idx
             query_tmp = query[:, start_idx: end_idx]
+            query_length = end_idx - start_idx
+            if attention_mask is not None:
+                attention_mask = self.prepare_attention_mask(
+                    attn,
+                    word_ids,
+                    word_lens,
+                    bboxes,
+                    height,
+                    width,
+                    num_frames,
+                    query_length,
+                    batch_size
+                )
+                attention_mask = attention_mask.view(batch_size, attn.heads, -1, attention_mask.shape[-1])
+                attention_mask = attention_mask.to(query.device)
+
             attention_probs = attn.get_attention_scores(query_tmp, key, attention_mask)
             hidden_states_tmp = torch.bmm(attention_probs, value)
             hidden_states_tmp = hidden_states_tmp.reshape(-1, attn.heads, *hidden_states_tmp.shape[1:])
