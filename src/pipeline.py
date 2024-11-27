@@ -7,7 +7,7 @@ from diffusers.pipelines.cogvideo.pipeline_cogvideox import CogVideoXPipeline, r
 from diffusers.pipelines.cogvideo.pipeline_output import CogVideoXPipelineOutput
 from diffusers.callbacks import MultiPipelineCallbacks, PipelineCallback
 
-from utils import prepare_word_ids
+from .utils import prepare_word_ids
 
 
 class MyCogVideoXPipeline(CogVideoXPipeline):

@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional, Tuple, Union
 import torch
 from torch import nn
 
-from attention_processor import CogVideoXAttnProcessor3_0
+from .attention_processor import CogVideoXAttnProcessor3_0
 
 
 class MyCogVideoXBlock(nn.Module):

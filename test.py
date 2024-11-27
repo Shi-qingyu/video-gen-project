@@ -12,16 +12,17 @@ bboxes = [[0.2, 0.3, 0.4, 0.7], [0.6, 0.3, 0.8, 0.7]]
 transformer = MyCogVideoXTransformer3DModel.from_pretrained(
     "THUDM/CogVideoX-5b",
     subfolder="transformer",
-    torch_dtype=torch.float16
-).to("cuda")
+    torch_dtype=torch.bfloat16
+)
 
 pipe = MyCogVideoXPipeline.from_pretrained(
     "THUDM/CogVideoX-5b",
     transformer=transformer,
     torch_dtype=torch.bfloat16
-).to("cuda")
-pipe.vae.enable_tiling()
+)
 
+pipe.vae.enable_tiling()
+pipe.enable_model_cpu_offload()
 
 video = pipe(
     prompt=prompt,

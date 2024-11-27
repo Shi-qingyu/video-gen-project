@@ -69,7 +69,7 @@ def prepare_word_ids(
                 raise ValueError(f"Error: word: {word} is not in prompt!")
             
             if input_ids[idx: idx+word_len] == word_idx:
-                word_ids.append(idx.item())
+                word_ids.append(idx)
                 break
     
     return word_ids, word_lens
