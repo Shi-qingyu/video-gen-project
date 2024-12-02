@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from diffusers.utils import export_to_video 
 
-from cogvideox.utils import load_pipeline, do_inversion
+from .utils import load_pipeline, do_inversion
 
 
 video_path = ["output/videos/direction_down_49_scene1.mp4",

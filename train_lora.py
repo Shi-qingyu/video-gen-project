@@ -47,8 +47,6 @@ from diffusers.utils import check_min_version, convert_unet_state_dict_to_peft, 
 from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_card
 from diffusers.utils.torch_utils import is_compiled_module
 
-from moft.motion_embedding import inject_and_load_motion_embedding, inject_motion_embedding, save_motion_embedding
-
 
 if is_wandb_available():
     import wandb
@@ -179,6 +177,18 @@ def get_args():
 
     # Training information
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
+    parser.add_argument(
+        "--rank",
+        type=int,
+        default=128,
+        help=("The dimension of the LoRA update matrices."),
+    )
+    parser.add_argument(
+        "--lora_alpha",
+        type=float,
+        default=128,
+        help=("The scaling factor to scale LoRA weight update. The actual scaling factor is `lora_alpha / rank`"),
+    )
     parser.add_argument(
         "--mixed_precision",
         type=str,
@@ -391,14 +401,6 @@ def get_args():
         help=(
             'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
             ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
-        ),
-    )
-    parser.add_argument(
-        "--version",
-        type=str,
-        default="v1",
-        help=(
-            'MotionEmbedding\'s version.'
         ),
     )
 
@@ -1025,13 +1027,6 @@ def main(args):
     transformer.requires_grad_(False)
     vae.requires_grad_(False)
 
-    if args.resume_from_checkpoint and args.resume_from_checkpoint != "":
-        trainable_parameters = inject_and_load_motion_embedding(
-            transformer, train=True, version=args.version, ckpt_path=args.resume_from_checkpoint
-        )
-    else:
-        trainable_parameters = inject_motion_embedding(transformer, train=True, version=args.version)
-
     # For mixed precision training we cast all non-trainable weights (vae, text_encoder and transformer) to half-precision
     # as these weights are only used for inference, keeping weights in full precision is not required.
     weight_dtype = torch.float32
@@ -1066,6 +1061,15 @@ def main(args):
     if args.gradient_checkpointing:
         transformer.enable_gradient_checkpointing()
 
+    # now we will add new LoRA weights to the attention layers
+    transformer_lora_config = LoraConfig(
+        r=args.rank,
+        lora_alpha=args.lora_alpha,
+        init_lora_weights=True,
+        target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+    )
+    transformer.add_adapter(transformer_lora_config)
+
     def unwrap_model(model):
         model = accelerator.unwrap_model(model)
         model = model._orig_mod if is_compiled_module(model) else model
@@ -1074,11 +1078,21 @@ def main(args):
     # create custom saving & loading hooks so that `accelerator.save_state(...)` serializes in a nice format
     def save_model_hook(models, weights, output_dir):
         if accelerator.is_main_process:
+            transformer_lora_layers_to_save = None
+
             for model in models:
-                if isinstance(unwrap_model(model), CogVideoXTransformer3DModel):
-                    save_path = os.path.join(output_dir, "motion_embedding.pth")
-                    save_motion_embedding(model, save_path)
+                if isinstance(model, type(unwrap_model(transformer))):
+                    transformer_lora_layers_to_save = get_peft_model_state_dict(model)
+                else:
+                    raise ValueError(f"unexpected save model: {model.__class__}")
+
+                # make sure to pop weight so that corresponding model is not saved again
                 weights.pop()
+
+            CogVideoXPipeline.save_lora_weights(
+                output_dir,
+                transformer_lora_layers=transformer_lora_layers_to_save,
+            )
 
     def load_model_hook(models, input_dir):
         transformer_ = None
@@ -1091,8 +1105,21 @@ def main(args):
             else:
                 raise ValueError(f"Unexpected save model: {model.__class__}")
 
-        checkpoint = os.path.join(input_dir, "motion_embedding.pth")
-        inject_and_load_motion_embedding(transformer_, checkpoint, version=args.version)
+        lora_state_dict = CogVideoXPipeline.lora_state_dict(input_dir)
+
+        transformer_state_dict = {
+            f'{k.replace("transformer.", "")}': v for k, v in lora_state_dict.items() if k.startswith("transformer.")
+        }
+        transformer_state_dict = convert_unet_state_dict_to_peft(transformer_state_dict)
+        incompatible_keys = set_peft_model_state_dict(transformer_, transformer_state_dict, adapter_name="default")
+        if incompatible_keys is not None:
+            # check only for unexpected keys
+            unexpected_keys = getattr(incompatible_keys, "unexpected_keys", None)
+            if unexpected_keys:
+                logger.warning(
+                    f"Loading adapter weights from state_dict led to unexpected keys not found in the model: "
+                    f" {unexpected_keys}. "
+                )
 
         # Make sure the trainable params are in float32. This is again needed since the base models
         # are in `weight_dtype`. More details:
@@ -1119,11 +1146,10 @@ def main(args):
         # only upcast trainable parameters (LoRA) into fp32
         cast_training_params([transformer], dtype=torch.float32)
 
-    transformer_motion_embedding_parameters = list(filter(lambda p: p.requires_grad, transformer.parameters()))
-    assert len(transformer_motion_embedding_parameters) == len(trainable_parameters)
+    transformer_lora_parameters = list(filter(lambda p: p.requires_grad, transformer.parameters()))
 
     # Optimization parameters
-    transformer_parameters_with_lr = {"params": transformer_motion_embedding_parameters, "lr": args.learning_rate}
+    transformer_parameters_with_lr = {"params": transformer_lora_parameters, "lr": args.learning_rate}
     params_to_optimize = [transformer_parameters_with_lr]
 
     use_deepspeed_optimizer = (
@@ -1241,7 +1267,33 @@ def main(args):
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
     global_step = 0
     first_epoch = 0
-    initial_global_step = 0
+
+    # Potentially load in the weights and states from a previous save
+    if not args.resume_from_checkpoint:
+        initial_global_step = 0
+    else:
+        if args.resume_from_checkpoint != "latest":
+            path = os.path.basename(args.resume_from_checkpoint)
+        else:
+            # Get the mos recent checkpoint
+            dirs = os.listdir(args.output_dir)
+            dirs = [d for d in dirs if d.startswith("checkpoint")]
+            dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
+            path = dirs[-1] if len(dirs) > 0 else None
+
+        if path is None:
+            accelerator.print(
+                f"Checkpoint '{args.resume_from_checkpoint}' does not exist. Starting a new training run."
+            )
+            args.resume_from_checkpoint = None
+            initial_global_step = 0
+        else:
+            accelerator.print(f"Resuming from checkpoint {path}")
+            accelerator.load_state(os.path.join(args.output_dir, path))
+            global_step = int(path.split("-")[1])
+
+            initial_global_step = global_step
+            first_epoch = global_step // num_update_steps_per_epoch
 
     progress_bar = tqdm(
         range(0, args.max_train_steps),

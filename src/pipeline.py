@@ -146,9 +146,14 @@ class MyCogVideoXPipeline(CogVideoXPipeline):
         self._interrupt = False
 
         word_ids, word_lens = prepare_word_ids(prompt, words, self.tokenizer)
-        latent_height = height // self.vae_scale_factor_spatial
-        latent_width = width // self.vae_scale_factor_spatial
+        latent_height = height // self.vae_scale_factor_spatial // self.transformer.patch_embed.patch_size
+        latent_width = width // self.vae_scale_factor_spatial // self.transformer.patch_embed.patch_size
         latent_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
+
+        word_ids = torch.tensor(word_ids, device=self._execution_device)
+        word_lens = torch.tensor(word_lens, device=self._execution_device)
+        bboxes = torch.tensor(bboxes, device=self._execution_device)
+
         attention_kwargs = {
             "word_ids": word_ids,
             "word_lens": word_lens,

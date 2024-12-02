@@ -6,7 +6,32 @@ from diffusers.models.transformers.cogvideox_transformer_3d import CogVideoXBloc
 from diffusers import CogVideoXPipeline
 from diffusers.utils import export_to_video
 
-class MotionEmbedding(nn.Module):
+class SpatialEmbedding(nn.Module):
+    def __init__(self, height, width, frames, dim) -> None:
+        super().__init__()
+        self.height = height
+        self.width = width
+        self.frames = frames
+        self.dim = dim
+        self.appearance_emb = nn.Parameter(torch.zeros(size=(height, width, dim)))
+    
+    def forward(self, hidden_states: torch.Tensor, train: bool = True):
+        batch, seq_len, dim = hidden_states.shape
+
+        spatial_emb = self.appearance_emb[None].repeat(self.frames, 1, 1, 1)
+        spatial_emb = spatial_emb.flatten(0, 2)
+
+        if seq_len <= spatial_emb.shape[0]:
+            spatial_emb = spatial_emb[:seq_len]
+        else:
+            spatial_emb = F.interpolate(spatial_emb.unsqueeze(0), size=(seq_len, dim), mode='linear', align_corners=False).squeeze(0)
+        
+        assert spatial_emb.shape == hidden_states[0].shape, f"expect emb.shape = {hidden_states[0].shape} but got {emb.shape}!"
+        
+        spatial_emb = spatial_emb.to(dtype=hidden_states.dtype, device=hidden_states.device)
+        return hidden_states + spatial_emb[None]
+    
+class SpatialTemporalEmbedding(nn.Module):
     def __init__(self, height, width, frames, dim) -> None:
         super().__init__()
         self.height = height
@@ -14,25 +39,31 @@ class MotionEmbedding(nn.Module):
         self.frames = frames
         self.dim = dim
 
-        seq_len = height * width * frames
-        self.emb = nn.Parameter(torch.zeros(size=(seq_len, dim), requires_grad=True))
+        self.appearance_emb = nn.Parameter(torch.zeros(size=(height, width, dim)))
+        self.appearance_emb.requires_grad_(False)
+
+        self.motion_emb = nn.Parameter(torch.zeros(size=(frames, dim)))
     
-    def forward(self, hidden_states: torch.Tensor, train: bool = True):
+    def forward(self, hidden_states: torch.Tensor, train=True):
         batch, seq_len, dim = hidden_states.shape
 
-        if seq_len <= self.emb.shape[0]:
-            emb = self.emb[:seq_len]
+        motion_emb = self.motion_emb.reshape(self.frames, 1, 1, self.dim).repeat(1, self.height, self.width, 1)
+        motion_emb = motion_emb - motion_emb.mean(0)
+        appearance_emb = self.appearance_emb.reshape(1, self.height, self.width, self.dim).repeat(self.frames, 1, 1, 1)
+        emb = motion_emb + appearance_emb
+ 
+        emb = emb.flatten(0, 2)
+
+        if seq_len <= emb.shape[0]:
+            emb = emb[:seq_len]
         else:
-            emb = F.interpolate(self.emb.unsqueeze(0), size=(seq_len, dim), mode='linear', align_corners=False).squeeze(0)
+            emb = F.interpolate(emb.unsqueeze(0), size=(seq_len, dim), mode='linear', align_corners=False).squeeze(0)
         
         assert emb.shape == hidden_states[0].shape, f"expect emb.shape = {hidden_states[0].shape} but got {emb.shape}!"
         
         emb = emb.to(dtype=hidden_states.dtype, device=hidden_states.device)
-        reshaped_emb = emb.reshape(self.frames, self.height * self.width, -1)
-        motion_emb = reshaped_emb - reshaped_emb.mean(0, keepdim=True)
-        motion_emb = motion_emb.flatten(0, 1)   # (f * h * w, d)
 
-        return hidden_states + motion_emb[None]
+        return hidden_states + emb[None]
     
 class MotionEmbeddingV2(nn.Module):
     def __init__(self, height, width, frames, dim) -> None:
@@ -42,8 +73,8 @@ class MotionEmbeddingV2(nn.Module):
         self.frames = frames
         self.dim = dim
 
-        self.appearance_emb = nn.Parameter(torch.zeros(size=(height, width, dim), requires_grad=True))
-        self.motion_emb = nn.Parameter(torch.zeros(size=(frames, dim), requires_grad=True))
+        self.appearance_emb = nn.Parameter(torch.zeros(size=(height, width, dim)))
+        self.motion_emb = nn.Parameter(torch.zeros(size=(frames, dim)))
     
     def forward(self, hidden_states: torch.Tensor, train=True):
         batch, seq_len, dim = hidden_states.shape
@@ -78,8 +109,8 @@ class MotionEmbeddingV3(nn.Module):
         self.frames = frames
         self.dim = dim
 
-        self.appearance_emb = nn.Parameter(torch.zeros(size=(height, width, dim), requires_grad=True))
-        self.motion_emb = nn.Parameter(torch.zeros(size=(frames, dim), requires_grad=True))
+        self.appearance_emb = nn.Parameter(torch.zeros(size=(height, width, dim)))
+        self.motion_emb = nn.Parameter(torch.zeros(size=(frames, dim)))
     
     def forward(self, hidden_states: torch.Tensor, train=True):
         batch, seq_len, dim = hidden_states.shape
@@ -144,8 +175,10 @@ def inject_motion_embedding(transformer: CogVideoXTransformer3DModel, train=True
     for module in transformer.modules():
         if module.__class__.__name__ == "CogVideoXBlock":
             module.forward = CogVideoXBlock_forward.__get__(module, CogVideoXBlock)
-            if version == "v1":
-                motion_embedding = MotionEmbedding(height=30, width=45, frames=13, dim=3072).to(transformer.device)
+            if version == "spatial":
+                motion_embedding = SpatialEmbedding(height=30, width=45, frames=13, dim=3072).to(transformer.device)
+            elif version == "spatialtemporal":
+                motion_embedding = SpatialTemporalEmbedding(height=30, width=45, frames=13, dim=3072).to(transformer.device)
             elif version == "v2":
                 motion_embedding = MotionEmbeddingV2(height=30, width=45, frames=13, dim=3072).to(transformer.device)
             elif version == "v3":
@@ -154,10 +187,15 @@ def inject_motion_embedding(transformer: CogVideoXTransformer3DModel, train=True
             module.add_module("motion_embedding", motion_embedding)
 
             if train:
-                for param in motion_embedding.parameters():
+                for name, param in motion_embedding.named_parameters():
+                    if version == "spatialtemporal":
+                        if "appearance_emb" in name:
+                            param.requires_grad_(False)
+                            continue
+                        
                     param.requires_grad_(True)
                     trainable_parameters.append(param)
-    
+                assert len(trainable_parameters) > 0, f"There is no trainable parameter!"
     return trainable_parameters
 
 
@@ -170,11 +208,18 @@ def save_motion_embedding(transformer: CogVideoXTransformer3DModel, save_path: s
     torch.save(motion_embedding_state_dict, save_path)
 
 
-def inject_and_load_motion_embedding(transformer: CogVideoXTransformer3DModel, ckpt_path: str, version: str = "v1", train: bool = False):
-    _ = inject_motion_embedding(transformer=transformer, train=train, version=version)
+def inject_and_load_motion_embedding(
+    transformer: CogVideoXTransformer3DModel, 
+    ckpt_path: str, 
+    version: str = "spatial", 
+    train: bool = False
+):
+    trainable_parameters = inject_motion_embedding(transformer=transformer, train=train, version=version)
     ckpt = torch.load(ckpt_path)
     _, unexpected_keys = transformer.load_state_dict(ckpt, strict=False)
-    assert len(unexpected_keys) == 0, f"Something wrong with the checkpoint!"
+    assert len(unexpected_keys) == 0 and len(_) > 0, f"Something wrong with the checkpoint!"
+    print("Loading motion embedding sucessfully!")
+    return trainable_parameters
 
 
 if __name__ == "__main__":
