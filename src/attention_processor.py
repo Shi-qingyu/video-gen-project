@@ -6,10 +6,11 @@ from diffusers.models.attention_processor import CogVideoXAttnProcessor2_0, Atte
 
 class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
 
-    def __init__(self, height=30, width=45):
+    def __init__(self, height=30, width=45, block_idx=None):
         super().__init__()
         self.height = height
         self.width = width
+        self.block_idx = block_idx
 
     def prepare_attention_mask(
         self,
@@ -206,6 +207,19 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
         attention_mask = attention_mask[None].repeat(batch_size * head_size, 1, 1)
 
         return attention_mask
+    
+    def store_attention_map(
+        self,
+        attention_map,
+        num_frames,
+        height,
+        width
+    ):
+        attention_map = attention_map.reshape(
+            attention_map.shape[0], num_frames, height, width, -1 
+        )
+        _attention_map = attention_map.mean(0).detach().clone().cpu()
+        self.attention_store.store(self.block_idx, _attention_map)
         
     def __call__(
         self,
@@ -262,6 +276,7 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
         key = key.flatten(0, 1)
         value = value.flatten(0, 1)
 
+        attention_map = []
         start_idx = 0
         for i, idx in enumerate(block_ids):
             end_idx = idx
@@ -269,25 +284,28 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
             query_length = end_idx - start_idx
             import time
 
-            if i == 1:
-                attention_mask = self.prepare_attention_mask_optimized(
-                    attn,
-                    word_ids,
-                    word_lens,
-                    bboxes,
-                    height,
-                    width,
-                    num_frames,
-                    query_length,
-                    text_seq_length,
-                    batch_size,
-                    query.dtype,
-                )
-                attention_mask = attention_mask.to(device=query.device)
-            else:
-                attention_mask = None
+            # if i == 1:
+            #     attention_mask = self.prepare_attention_mask_optimized(
+            #         attn,
+            #         word_ids,
+            #         word_lens,
+            #         bboxes,
+            #         height,
+            #         width,
+            #         num_frames,
+            #         query_length,
+            #         text_seq_length,
+            #         batch_size,
+            #         query.dtype,
+            #     )
+            #     attention_mask = attention_mask.to(device=query.device)
+            # else:
+            #     attention_mask = None
 
-            attention_probs = attn.get_attention_scores(query_tmp, key, attention_mask)
+            attention_probs = attn.get_attention_scores(query_tmp, key, attention_mask) # (b * h, q_len, k_len)
+            
+            if i != 0:
+                attention_map.append(attention_probs[:, :, torch.tensor(word_ids, device=query.device, dtype=torch.int32)])
             hidden_states_tmp = torch.bmm(attention_probs, value)
             hidden_states_tmp = hidden_states_tmp.reshape(-1, attn.heads, *hidden_states_tmp.shape[1:])
             hidden_states_tmp = hidden_states_tmp.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
@@ -295,6 +313,8 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
             start_idx = end_idx
         
         hidden_states = torch.cat(hidden_state_blocks, dim=1)   # (bs, seq_len, dim)
+        attention_map = torch.cat(attention_map, dim=1)
+        self.store_attention_map(attention_map=attention_map, num_frames=num_frames, height=height, width=width)
 
         # linear proj
         hidden_states = attn.to_out[0](hidden_states)

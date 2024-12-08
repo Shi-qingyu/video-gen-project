@@ -67,8 +67,10 @@ class MyCogVideoXBlock(nn.Module):
         ff_inner_dim: Optional[int] = None,
         ff_bias: bool = True,
         attention_out_bias: bool = True,
+        block_idx: int = None,
     ):
         super().__init__()
+        self.block_idx = block_idx
 
         # 1. Self Attention
         self.norm1 = CogVideoXLayerNormZero(time_embed_dim, dim, norm_elementwise_affine, norm_eps, bias=True)
@@ -81,7 +83,7 @@ class MyCogVideoXBlock(nn.Module):
             eps=1e-6,
             bias=attention_bias,
             out_bias=attention_out_bias,
-            processor=CogVideoXAttnProcessor3_0(),
+            processor=CogVideoXAttnProcessor3_0(block_idx=block_idx),
         )
 
         # 2. Feed Forward
@@ -264,8 +266,9 @@ class MyCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
                     attention_bias=attention_bias,
                     norm_elementwise_affine=norm_elementwise_affine,
                     norm_eps=norm_eps,
+                    block_idx=str(i),
                 )
-                for _ in range(num_layers)
+                for i in range(num_layers)
             ]
         )
 

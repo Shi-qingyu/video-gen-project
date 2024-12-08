@@ -6,32 +6,32 @@ from diffusers.utils import export_to_video
 
 from moft.motion_embedding import inject_and_load_motion_embedding
 
-prompt = "The sks cat is dancing on the beach."
+prompt = "The ironman riding a horse jumping over a fence."
 seed = 42
 device = "cuda:2"
-ckpt_path = "results/dance_lr_1e-3_v3/checkpoint-400/motion_embedding.pth"
+ckpt_path = "results/origin/checkpoint-500/motion_embedding.pth"
 
 pipe = CogVideoXPipeline.from_pretrained(
     "THUDM/CogVideoX-5b",
     torch_dtype=torch.bfloat16
 )
 
-inject_and_load_motion_embedding(
-    pipe.transformer,
-    ckpt_path=ckpt_path, 
-    version="spatialtemporal",
-    train=True
-)
+# inject_and_load_motion_embedding(
+#     pipe.transformer,
+#     ckpt_path=ckpt_path, 
+#     version="spatial",
+#     train=True
+# )
 
 config = ckpt_path.split("/")[1]
 
 pipe.to(device)
 pipe.vae.enable_tiling()
 
-lora_scaling = 96 / 128
-pipe.load_lora_weights("../CogVideo/finetune/checkpoints/step_500-r_128-lr_1e-4-f_49-cat_dog_videos-5b/pytorch_lora_weights.safetensors", adapter_name="cogvideox-lora")
-pipe.set_adapters(["cogvideox-lora"], [lora_scaling])
-config = "lora"
+# lora_scaling = 128 / 128
+# pipe.load_lora_weights("../CogVideo/finetune/checkpoints/step_500-r_128-lr_1e-4-f_49-cat_dog_videos-5b/pytorch_lora_weights.safetensors", adapter_name="cogvideox-lora")
+# pipe.set_adapters(["cogvideox-lora"], [lora_scaling])
+# config = "lora"
 
 video = pipe(
     prompt=prompt,
@@ -43,7 +43,7 @@ video = pipe(
 ).frames[0]
 
 prompt = prompt.replace(" ", "_")[:-1]
-save_dir = os.path.join("outputs", "output_videos", prompt)
+save_dir = os.path.join("outputs", prompt)
 os.makedirs(save_dir, exist_ok=True)
-save_path = os.path.join(save_dir, f"{config}_lora-0.75_{seed}.mp4")
+save_path = os.path.join(save_dir, f"{config}_{seed}.mp4")
 export_to_video(video, save_path, fps=8)

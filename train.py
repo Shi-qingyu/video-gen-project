@@ -1409,41 +1409,6 @@ def main(args):
     # Save the lora layers
     accelerator.wait_for_everyone()
     if accelerator.is_main_process:
-        transformer = unwrap_model(transformer)
-        dtype = (
-            torch.float16
-            if args.mixed_precision == "fp16"
-            else torch.bfloat16
-            if args.mixed_precision == "bf16"
-            else torch.float32
-        )
-        transformer = transformer.to(dtype)
-        transformer_lora_layers = get_peft_model_state_dict(transformer)
-
-        CogVideoXPipeline.save_lora_weights(
-            save_directory=args.output_dir,
-            transformer_lora_layers=transformer_lora_layers,
-        )
-
-        # Final test inference
-        pipe = CogVideoXPipeline.from_pretrained(
-            args.pretrained_model_name_or_path,
-            revision=args.revision,
-            variant=args.variant,
-            torch_dtype=weight_dtype,
-        )
-        pipe.scheduler = CogVideoXDPMScheduler.from_config(pipe.scheduler.config)
-
-        if args.enable_slicing:
-            pipe.vae.enable_slicing()
-        if args.enable_tiling:
-            pipe.vae.enable_tiling()
-
-        # Load LoRA weights
-        lora_scaling = args.lora_alpha / args.rank
-        pipe.load_lora_weights(args.output_dir, adapter_name="cogvideox-lora")
-        pipe.set_adapters(["cogvideox-lora"], [lora_scaling])
-
         # Run inference
         validation_outputs = []
         if args.validation_prompt and args.num_validation_videos > 0:

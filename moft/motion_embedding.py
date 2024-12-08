@@ -217,7 +217,7 @@ def inject_and_load_motion_embedding(
     trainable_parameters = inject_motion_embedding(transformer=transformer, train=train, version=version)
     ckpt = torch.load(ckpt_path)
     _, unexpected_keys = transformer.load_state_dict(ckpt, strict=False)
-    assert len(unexpected_keys) == 0 and len(_) > 0, f"Something wrong with the checkpoint!"
+    assert len(unexpected_keys) == 0, f"Something wrong with the checkpoint!"
     print("Loading motion embedding sucessfully!")
     return trainable_parameters
 

@@ -2,6 +2,7 @@
 /outputs/
 /data/
 
+attention_map
 results
 .vscode
 ./__pycache__

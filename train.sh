@@ -2,7 +2,7 @@
 
 export MODEL_PATH="THUDM/CogVideoX-5b"
 export DATASET_PATH="./data/horsejump"
-export OUTPUT_PATH="results/horsejump_lr_5e-4_spatial"
+export OUTPUT_PATH="results/horsejump_lr_1e-3_st_1e-3_300"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 
@@ -18,10 +18,6 @@ accelerate launch --config_file configs/accelerate_config_machine_single.yaml --
   --instance_data_root $DATASET_PATH \
   --caption_column prompts.txt \
   --video_column videos.txt \
-  --validation_prompt "A cat is swimming in the pool" \
-  --validation_prompt_separator ::: \
-  --num_validation_videos 1 \
-  --validation_epochs 500 \
   --seed 0 \
   --mixed_precision bf16 \
   --output_dir $OUTPUT_PATH \
@@ -34,10 +30,10 @@ accelerate launch --config_file configs/accelerate_config_machine_single.yaml --
   --train_batch_size 1 \
   --max_train_steps 500 \
   --checkpointing_steps 100 \
-  --resume_from_checkpoint "" \
+  --resume_from_checkpoint "results/horsejump_lr_1e-3_spatial/checkpoint-300/motion_embedding.pth" \
   --gradient_accumulation_steps 1 \
-  --learning_rate 5e-4 \
+  --learning_rate 1e-3 \
   --optimizer AdamW \
   --adam_beta1 0.9 \
   --adam_beta2 0.95 \
-  --version "spatial"
+  --version "spatialtemporal"
