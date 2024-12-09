@@ -18,13 +18,6 @@ def load_pipeline(pretrained_model_name_or_path, device="cuda"):
     pipeline = MyCogVideoXPipeline.from_pretrained(
         pretrained_model_name_or_path=pretrained_model_name_or_path,
         transformer=transformer,
-        # scheduler=AsyrpScheduler(
-        #     beta_start=0.00085,
-        #     beta_end=0.012,
-        #     beta_schedule='linear',
-        #     clip_sample=False,
-        #     set_alpha_to_one=False
-        # ),
     ).to(device)
 
     return pipeline

@@ -1,6 +1,6 @@
 from src.pipeline import MyCogVideoXPipeline
 from src.transformer import MyCogVideoXTransformer3DModel
-from attention_store import AttentionStore
+from src.attention_store import AttentionStore
 
 import os
 import torch
@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torchvision.io import write_png
 from diffusers.utils import export_to_video
 
-prompt = "A dog is playing with a puppy."
+prompt = "A dog is playing with a puppy, realistic style."
 words = ["dog", "puppy"]
 bboxes = [[0.2, 0.3, 0.4, 0.7], [0.6, 0.3, 0.8, 0.7]]
 device = "cuda:0"

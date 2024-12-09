@@ -26,7 +26,7 @@ class SpatialEmbedding(nn.Module):
         else:
             spatial_emb = F.interpolate(spatial_emb.unsqueeze(0), size=(seq_len, dim), mode='linear', align_corners=False).squeeze(0)
         
-        assert spatial_emb.shape == hidden_states[0].shape, f"expect emb.shape = {hidden_states[0].shape} but got {emb.shape}!"
+        assert spatial_emb.shape == hidden_states[0].shape, f"expect emb.shape = {hidden_states[0].shape} but got {spatial_emb.shape}!"
         
         spatial_emb = spatial_emb.to(dtype=hidden_states.dtype, device=hidden_states.device)
         return hidden_states + spatial_emb[None]

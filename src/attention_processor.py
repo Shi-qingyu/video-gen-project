@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 import torch.nn.functional as F
 
@@ -107,29 +109,30 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
 
                 vertical_video_mask = video_mask_flat[:, None].repeat(1, word_len)
                 vertical_video_mask = torch.where(
-                    vertical_video_mask.bool(), torch.tensor(2.5, dtype=dtype, device=device), torch.tensor(-2.5, dtype=dtype, device=device)
+                    vertical_video_mask.bool(), torch.tensor(0.2, dtype=dtype, device=device), torch.tensor(-0.2, dtype=dtype, device=device)
                 )
                 
                 attention_mask[:, word_id:word_id + word_len] = vertical_video_mask
 
                 pos_in_bbox = video_mask_flat.bool()
-                attention_mask[pos_in_bbox, :word_id] = torch.tensor(-2.5, dtype=dtype, device=device)
-                attention_mask[pos_in_bbox, word_id + word_len:] = torch.tensor(-2.5, dtype=dtype, device=device)
+                attention_mask[pos_in_bbox, :word_id] = torch.tensor(-0.2, dtype=dtype, device=device)
+                attention_mask[pos_in_bbox, word_id + word_len:] = torch.tensor(-0.2, dtype=dtype, device=device)
 
         elif query_length == text_seq_length:
-            for idx in range(len(word_ids)):
-                word_id = word_ids[idx]
-                word_len = word_lens[idx]
+            pass
+            # for idx in range(len(word_ids)):
+            #     word_id = word_ids[idx]
+            #     word_len = word_lens[idx]
 
-                video_mask = torch.zeros((num_frames, height, width), dtype=dtype, device=device)
-                video_mask[:, y1[idx]:y2[idx], x1[idx]:x2[idx]] = 1
-                video_mask_flat = video_mask.flatten()
+            #     video_mask = torch.zeros((num_frames, height, width), dtype=dtype, device=device)
+            #     video_mask[:, y1[idx]:y2[idx], x1[idx]:x2[idx]] = 1
+            #     video_mask_flat = video_mask.flatten()
 
-                video_mask_expanded = video_mask_flat[None, :].repeat(word_len, 1)
+            #     video_mask_expanded = video_mask_flat[None, :].repeat(word_len, 1)
 
-                attention_mask[word_id:word_id + word_len, 226:] = torch.where(
-                    video_mask_expanded.bool(), torch.tensor(2.5, dtype=dtype, device=device), torch.tensor(-2.5, dtype=dtype, device=device)
-                )
+            #     attention_mask[word_id:word_id + word_len, 226:] = torch.where(
+            #         video_mask_expanded.bool(), torch.tensor(2.5, dtype=dtype, device=device), torch.tensor(-2.5, dtype=dtype, device=device)
+            #     )
 
         attention_mask = attention_mask[None].repeat(batch_size * head_size, 1, 1)
 
@@ -208,6 +211,54 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
 
         return attention_mask
     
+    def get_attention_scores(
+        self, attn: Attention, query: torch.Tensor, key: torch.Tensor, attention_mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        r"""
+        Compute the attention scores.
+
+        Args:
+            query (`torch.Tensor`): The query tensor.
+            key (`torch.Tensor`): The key tensor.
+            attention_mask (`torch.Tensor`, *optional*): The attention mask to use. If `None`, no mask is applied.
+
+        Returns:
+            `torch.Tensor`: The attention probabilities/scores.
+        """
+        dtype = query.dtype
+        if attn.upcast_attention:
+            query = query.float()
+            key = key.float()
+
+        if attention_mask is None:
+            baddbmm_input = torch.empty(
+                query.shape[0], query.shape[1], key.shape[1], dtype=query.dtype, device=query.device
+            )
+            beta = 0
+        else:
+            baddbmm_input = attention_mask
+            beta = 1
+
+        attention_scores = torch.baddbmm(
+            baddbmm_input,
+            query,
+            key.transpose(-1, -2),
+            beta=beta,
+            alpha=self.scale,
+        )
+        del baddbmm_input
+
+        if attn.upcast_softmax:
+            attention_scores = attention_scores.float()
+
+        attention_probs = attention_scores.softmax(dim=-1)
+        del attention_scores
+
+        attention_probs = attention_probs.to(dtype)
+
+        return attention_probs
+
+
     def store_attention_map(
         self,
         attention_map,
@@ -284,25 +335,22 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
             query_length = end_idx - start_idx
             import time
 
-            # if i == 1:
-            #     attention_mask = self.prepare_attention_mask_optimized(
-            #         attn,
-            #         word_ids,
-            #         word_lens,
-            #         bboxes,
-            #         height,
-            #         width,
-            #         num_frames,
-            #         query_length,
-            #         text_seq_length,
-            #         batch_size,
-            #         query.dtype,
-            #     )
-            #     attention_mask = attention_mask.to(device=query.device)
-            # else:
-            #     attention_mask = None
+            attention_mask = self.prepare_attention_mask_optimized(
+                attn,
+                word_ids,
+                word_lens,
+                bboxes,
+                height,
+                width,
+                num_frames,
+                query_length,
+                text_seq_length,
+                batch_size,
+                query.dtype,
+            )
+            attention_mask = attention_mask.to(device=query.device)
 
-            attention_probs = attn.get_attention_scores(query_tmp, key, attention_mask) # (b * h, q_len, k_len)
+            attention_probs = self.get_attention_scores(attn, query_tmp, key, attention_mask) # (b * h, q_len, k_len)
             
             if i != 0:
                 attention_map.append(attention_probs[:, :, torch.tensor(word_ids, device=query.device, dtype=torch.int32)])
