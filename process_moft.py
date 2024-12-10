@@ -38,8 +38,9 @@ outpath = ["outputs/inter_feat/direction_down_49_scene1.pt",
 
 pretrained_model_name_or_path = "THUDM/CogVideoX-5b"
 prompt = ""
+layer_idx = [0]
 pipeline = load_pipeline(pretrained_model_name_or_path)
-do_inversion(pipeline, prompt, video_path, outpath)
+do_inversion(pipeline, prompt, layer_idx, video_path, outpath)
 
 data_list = ["outputs/inter_feat/direction_down_49_scene1.pt",
              "outputs/inter_feat/direction_down_49_scene2.pt",

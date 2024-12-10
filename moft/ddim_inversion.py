@@ -86,11 +86,11 @@ class DDIMInversion:
             all_return_features.append(feat)    #
         return transformer_output, all_return_features # list of tensors
 
-    def get_v_pred_single(self, latents, t, context, force_grad=False, return_intermediates=False):
+    def get_v_pred_single(self, latents, t, context, layer_idx=[0], return_intermediates=False):
         if return_intermediates:
             h = 60
             w = 90
-            v_pred, intermediate_feature = self.forward_transformer_features(latents, t, context, layer_idx=[41], interp_res_h=h, interp_res_w=w)
+            v_pred, intermediate_feature = self.forward_transformer_features(latents, t, context, layer_idx=layer_idx, interp_res_h=h, interp_res_w=w)
             v_pred = v_pred.sample
             return v_pred, intermediate_feature
         else:
@@ -151,7 +151,7 @@ class DDIMInversion:
 
 
     @torch.no_grad()
-    def ddim_loop(self, latent, pred_step=None, return_intermediates=False):
+    def ddim_loop(self, latent, pred_step=None, layer_idx=[0], return_intermediates=False):
         uncond_embeddings, cond_embeddings = self.context.chunk(2)
         all_latent = [latent]
         all_interfeature = []
@@ -171,7 +171,7 @@ class DDIMInversion:
             else:
                 latent_model_input = latent
 
-            v_pred, intermediate_feature = self.get_v_pred_single(latent_model_input, t, cond_embeddings, return_intermediates=return_intermediates)
+            v_pred, intermediate_feature = self.get_v_pred_single(latent_model_input, t, cond_embeddings, layer_idx, return_intermediates=return_intermediates)
 
             if self.cfg:
                 v_pred_uncond, v_pred_text = v_pred.chunk(2)
@@ -188,12 +188,12 @@ class DDIMInversion:
         return self.model.scheduler
 
     @torch.no_grad()
-    def ddim_inversion(self, image=None, latent=None, pred_step=None, return_intermediates=False):
+    def ddim_inversion(self, image=None, latent=None, pred_step=None, layer_idx=[0], return_intermediates=False):
         if latent is None:
             latent = self.model.vae.encode(image).latent_dist.sample()
             latent = latent * self.model.vae.config.scaling_factor
             latent = latent.transpose(1, 2)
-        ddim_latents, inter_feat = self.ddim_loop(latent, pred_step=pred_step, return_intermediates=return_intermediates)
+        ddim_latents, inter_feat = self.ddim_loop(latent, pred_step=pred_step, layer_idx=layer_idx, return_intermediates=return_intermediates)
         return ddim_latents, inter_feat
 
     def run_inversion(self, image):

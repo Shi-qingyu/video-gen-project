@@ -39,11 +39,11 @@ def get_tensor_from_video(video_path, width=720, height=480, max_num_frames=49):
 
 
 class MyCogVideoXPipeline(CogVideoXPipeline):
-    def save_inter_feat(self, video_path, prompts, outpath):
+    def save_inter_feat(self, video_path, prompts, layer_idx, outpath):
         video_tensor = get_tensor_from_video(video_path)
         video = video_tensor[None].to(self._execution_device)  # (B, C, F, H, W)
 
-        latents, inter_feat = self.run_ddim_inversion(video, prompts, self.scheduler, return_intermediates=True)
+        latents, inter_feat = self.run_ddim_inversion(video, prompts, self.scheduler, layer_idx=layer_idx, return_intermediates=True)
 
         last_latent = latents[-1]
         # print(f"last latent's shape: {last_latent.shape}")
@@ -51,7 +51,7 @@ class MyCogVideoXPipeline(CogVideoXPipeline):
         inter_feat = sum([inter_feat[i][0] for i in range(len(inter_feat))]) / len(inter_feat)   # [B * F, C, H, W]
         torch.save(inter_feat, outpath)
 
-    def run_ddim_inversion(self, image, prompt, scheduler, pred_step=None, return_intermediates=False):
+    def run_ddim_inversion(self, image, prompt, scheduler, pred_step=None, layer_idx=[0], return_intermediates=False):
         inversioner = DDIMInversion(self,
                                     inversion_reg_steps = 5,
                                     inversion_ac_rolls = 5,
@@ -60,7 +60,7 @@ class MyCogVideoXPipeline(CogVideoXPipeline):
                                     scheduler=scheduler,
                                     cfg=False)
         inversioner.init_prompt(prompt)
-        latents, inter_feat = inversioner.ddim_inversion(image, pred_step=pred_step, return_intermediates=return_intermediates)
+        latents, inter_feat = inversioner.ddim_inversion(image, pred_step=pred_step, layer_idx=layer_idx, return_intermediates=return_intermediates)
 
         encoder_hidden_state = inversioner.context
         _, cond = torch.chunk(encoder_hidden_state, 2)
