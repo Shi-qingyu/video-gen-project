@@ -4,7 +4,7 @@ import torch
 from diffusers import CogVideoXPipeline
 from diffusers.utils import export_to_video
 
-from moft.motion_embedding import inject_and_load_motion_embedding
+from src.motion_embedding import inject_and_load_motion_embedding
 
 prompt = "The ironman riding a horse jumping over a fence."
 seed = 42

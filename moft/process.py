@@ -7,47 +7,50 @@ import torch.nn.functional as F
 
 from diffusers.utils import export_to_video 
 
-from .utils import load_pipeline, do_inversion
+from moft.utils import load_pipeline, do_inversion
 
 
-video_path = ["output/videos/direction_down_49_scene1.mp4",
-              "output/videos/direction_down_49_scene2.mp4",
-              "output/videos/direction_up_49_scene1.mp4",
-              "output/videos/direction_up_49_scene2.mp4",
-              "output/videos/direction_right_49_scene1.mp4",
-              "output/videos/direction_right_49_scene2.mp4",
-              "output/videos/direction_left_49_scene1.mp4",
-              "output/videos/direction_left_49_scene2.mp4",
-              "output/videos/direction_still_49_scene1.mp4",
-              "output/videos/direction_still_49_scene2.mp4",]
-outpath = ["output/inter_feat/direction_down_49_scene1.pt",
-           "output/inter_feat/direction_down_49_scene2.pt",
-           "output/inter_feat/direction_up_49_scene1.pt",
-           "output/inter_feat/direction_up_49_scene2.pt",
-           "output/inter_feat/direction_right_49_scene1.pt",
-           "output/inter_feat/direction_right_49_scene2.pt",
-           "output/inter_feat/direction_left_49_scene1.pt",
-           "output/inter_feat/direction_left_49_scene2.pt",
-           "output/inter_feat/direction_still_49_scene1.pt",
-           "output/inter_feat/direction_still_49_scene2.pt",]
+# prompt = ""
+# video_path = ["data/dance/videos/dance-jump.mp4"]
+# outpath = ["outputs/inversion_dance.pt"]
 
-os.makedirs('output/inter_feat', exist_ok=True)
+video_path = ["data/moft/direction_down_49_scene1.mp4",
+              "data/moft/direction_down_49_scene2.mp4",
+              "data/moft/direction_up_49_scene1.mp4",
+              "data/moft/direction_up_49_scene2.mp4",
+              "data/moft/direction_right_49_scene1.mp4",
+              "data/moft/direction_right_49_scene2.mp4",
+              "data/moft/direction_left_49_scene1.mp4",
+              "data/moft/direction_left_49_scene2.mp4",
+              "data/moft/direction_still_49_scene1.mp4",
+              "data/moft/direction_still_49_scene2.mp4",]
+
+outpath = ["outputs/inter_feat/direction_down_49_scene1.pt",
+           "outputs/inter_feat/direction_down_49_scene2.pt",
+           "outputs/inter_feat/direction_up_49_scene1.pt",
+           "outputs/inter_feat/direction_up_49_scene2.pt",
+           "outputs/inter_feat/direction_right_49_scene1.pt",
+           "outputs/inter_feat/direction_right_49_scene2.pt",
+           "outputs/inter_feat/direction_left_49_scene1.pt",
+           "outputs/inter_feat/direction_left_49_scene2.pt",
+           "outputs/inter_feat/direction_still_49_scene1.pt",
+           "outputs/inter_feat/direction_still_49_scene2.pt",]
 
 pretrained_model_name_or_path = "THUDM/CogVideoX-5b"
+prompt = ""
 pipeline = load_pipeline(pretrained_model_name_or_path)
-do_inversion(pipeline, video_path, outpath)
+do_inversion(pipeline, prompt, video_path, outpath)
 
-
-data_list = ["output/inter_feat/direction_down_49_scene1.pt",
-           "output/inter_feat/direction_down_49_scene2.pt",
-           "output/inter_feat/direction_up_49_scene1.pt",
-           "output/inter_feat/direction_up_49_scene2.pt",
-           "output/inter_feat/direction_right_49_scene1.pt",
-           "output/inter_feat/direction_right_49_scene2.pt",
-           "output/inter_feat/direction_left_49_scene1.pt",
-           "output/inter_feat/direction_left_49_scene2.pt",
-           "output/inter_feat/direction_still_49_scene1.pt",
-           "output/inter_feat/direction_still_49_scene2.pt",]
+data_list = ["outputs/inter_feat/direction_down_49_scene1.pt",
+             "outputs/inter_feat/direction_down_49_scene2.pt",
+             "outputs/inter_feat/direction_up_49_scene1.pt",
+             "outputs/inter_feat/direction_up_49_scene2.pt",
+             "outputs/inter_feat/direction_right_49_scene1.pt",
+             "outputs/inter_feat/direction_right_49_scene2.pt",
+             "outputs/inter_feat/direction_left_49_scene1.pt",
+             "outputs/inter_feat/direction_left_49_scene2.pt",
+             "outputs/inter_feat/direction_still_49_scene1.pt",
+             "outputs/inter_feat/direction_still_49_scene2.pt",]
 
 total_data_num = len(data_list)
 
@@ -63,7 +66,7 @@ for i, path in enumerate(data_list):
     data = data[:, :, h // 2 - crop_size // 2: h // 2 + crop_size // 2, w // 2 - crop_size // 2: w // 2 + crop_size // 2]
 
     data = data.reshape(frame_num, c, crop_size, crop_size)
-    # data = data - data.mean(dim=0, keepdim=True)
+    # data = data - data.mean(dim=0, keepdim=True)  # remove the content feature
     data = data[0]
     data = data.reshape(c, crop_size, crop_size)
     data = data[None]
@@ -72,7 +75,7 @@ for i, path in enumerate(data_list):
     if data_tensor_origin is None:
         data_tensor_origin = data
     else:
-        data_tensor_origin = torch.cat([data_tensor_origin, data],dim=0)
+        data_tensor_origin = torch.cat([data_tensor_origin, data], dim=0)
 
 
 data_tensor = data_tensor_origin #.cuda()
@@ -114,6 +117,6 @@ for i in range(total_data_num):
 plt.legend(handles=handles, bbox_to_anchor=(1.05, 1.0))
     
 plt.tight_layout()
-plt.savefig('output/pca_moft_wo_ccr.png')
+plt.savefig('outputs/pca_moft_wo_ccr.png')
 plt.show()
 plt.close()

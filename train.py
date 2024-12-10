@@ -47,7 +47,7 @@ from diffusers.utils import check_min_version, convert_unet_state_dict_to_peft, 
 from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_card
 from diffusers.utils.torch_utils import is_compiled_module
 
-from moft.motion_embedding import inject_and_load_motion_embedding, inject_motion_embedding, save_motion_embedding
+from src.motion_embedding import inject_and_load_motion_embedding, inject_motion_embedding, save_motion_embedding
 
 
 if is_wandb_available():

@@ -8,7 +8,6 @@ import torch.nn.functional as F
 
 
 class DDIMInversion:
-
     def __init__(self,
                  model,
                  num_reg_steps=0,
@@ -18,7 +17,6 @@ class DDIMInversion:
                  scheduler = None,
                  cfg=False,
                  **kwargs):
-        scheduler = scheduler
         self.model = model
         self.num_ddim_steps = kwargs.pop('num_ddim_steps', 25)
         self.guidance_scale = kwargs.pop('guidance_scale', 7.5)
@@ -65,12 +63,12 @@ class DDIMInversion:
             timestep] if timestep >= 0 else self.scheduler.final_alpha_cumprod
         alpha_prod_t_next = self.scheduler.alphas_cumprod[next_timestep]
         beta_prod_t = 1 - alpha_prod_t
-        next_original_sample = (
-            sample - beta_prod_t ** 0.5 * model_output) / alpha_prod_t ** 0.5
-        next_sample_direction = (1 - alpha_prod_t_next) ** 0.5 * model_output
-        next_sample = alpha_prod_t_next ** 0.5 * next_original_sample \
-            + next_sample_direction
-        return next_sample
+        beta_prod_t_next = 1 - alpha_prod_t_next
+
+        x_0_pred = alpha_prod_t ** 0.5 * sample - beta_prod_t ** 0.5 * model_output
+        eps_pred = alpha_prod_t ** 0.5 * model_output + beta_prod_t ** 0.5 * sample
+        x_next_timestep = (beta_prod_t_next) ** 0.5 * eps_pred + (alpha_prod_t_next) ** 0.5 * x_0_pred
+        return x_next_timestep
 
     def forward_transformer_features(self, z, t, encoder_hidden_states, layer_idx=[0], interp_res_h=256, interp_res_w=256):
         transformer_output, all_intermediate_features = self.model.transformer(
@@ -88,13 +86,13 @@ class DDIMInversion:
             all_return_features.append(feat)    #
         return transformer_output, all_return_features # list of tensors
 
-    def get_noise_pred_single(self, latents, t, context, force_grad=False, return_intermediates=False):
+    def get_v_pred_single(self, latents, t, context, force_grad=False, return_intermediates=False):
         if return_intermediates:
             h = 60
             w = 90
-            noise_pred, intermediate_feature = self.forward_transformer_features(latents, t, context, layer_idx=[41], interp_res_h=h, interp_res_w=w)
-            noise_pred = noise_pred.sample
-            return noise_pred, intermediate_feature
+            v_pred, intermediate_feature = self.forward_transformer_features(latents, t, context, layer_idx=[41], interp_res_h=h, interp_res_w=w)
+            v_pred = v_pred.sample
+            return v_pred, intermediate_feature
         else:
             noise_pred = self.model.transformer(latents,
                                                 t,
@@ -173,13 +171,13 @@ class DDIMInversion:
             else:
                 latent_model_input = latent
 
-            noise_pred, intermediate_feature = self.get_noise_pred_single(latent_model_input, t, cond_embeddings, return_intermediates=return_intermediates)
+            v_pred, intermediate_feature = self.get_v_pred_single(latent_model_input, t, cond_embeddings, return_intermediates=return_intermediates)
 
             if self.cfg:
-                noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-                noise_pred = noise_pred_uncond + 7.5 * (noise_pred_text - noise_pred_uncond)
+                v_pred_uncond, v_pred_text = v_pred.chunk(2)
+                v_pred = v_pred_uncond + 7.5 * (v_pred_text - v_pred_uncond)
 
-            latent = self.next_step(noise_pred, t.item(), latent)
+            latent = self.next_step(v_pred, t.item(), latent)
             all_latent.append(latent)
             all_interfeature.append(intermediate_feature)
 

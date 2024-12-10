@@ -79,8 +79,6 @@ class MyCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
                     image_rotary_emb=image_rotary_emb,
                 )
             if return_intermediates:
-                
-
                 p = self.config.patch_size
                 output = hidden_states.reshape(batch_size, num_frames, height // p, width // p, -1, p, p)
                 output = output.permute(0, 1, 4, 2, 5, 3, 6).flatten(5, 6).flatten(3, 4)   # (B, F, C, H, W)

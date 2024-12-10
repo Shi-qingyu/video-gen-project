@@ -22,11 +22,11 @@ def load_pipeline(pretrained_model_name_or_path, device="cuda"):
 
     return pipeline
 
-def do_inversion(pipeline: MyCogVideoXPipeline, video_path_list: list, outpath_list: list):
+def do_inversion(pipeline: MyCogVideoXPipeline, prompt: str, video_path_list: list, outpath_list: list):
     for video_path, outpath in zip(video_path_list, outpath_list):
         pipeline.save_inter_feat(
             video_path=video_path,
-            prompts='', 
+            prompts=prompt, 
             outpath=outpath
         )
 
