@@ -580,7 +580,7 @@ class VideoDataset(Dataset):
             # Training transforms
             frames = frames.float()
             frames = torch.stack([train_transforms(frame) for frame in frames], dim=0)
-            videos.append(frames.permute(0, 3, 1, 2).contiguous())  # [F, C, H, W]
+            videos.append(frames.permute(0, 3, 1, 2).contiguous())  # frames.shape: [F, C, H, W]
 
         return videos
 
@@ -1155,7 +1155,7 @@ def main(args):
     )
 
     def encode_video(video):
-        video = video.to(accelerator.device, dtype=vae.dtype).unsqueeze(0)
+        video = video.to(accelerator.device, dtype=vae.dtype).unsqueeze(0)  #[B, F, C, H, W]
         video = video.permute(0, 2, 1, 3, 4)  # [B, C, F, H, W]
         latent_dist = vae.encode(video).latent_dist
         return latent_dist
@@ -1307,7 +1307,7 @@ def main(args):
 
                 # Predict the noise residual
                 model_output = transformer(
-                    hidden_states=noisy_model_input,
+                    hidden_states=noisy_model_input,    # [B, F, C, H, W]
                     encoder_hidden_states=prompt_embeds,
                     timestep=timesteps,
                     image_rotary_emb=image_rotary_emb,

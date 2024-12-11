@@ -10,48 +10,51 @@ from diffusers.utils import export_to_video
 from moft.utils import load_pipeline, do_inversion
 
 
-# prompt = ""
-# video_path = ["data/dance/videos/dance-jump.mp4"]
-# outpath = ["outputs/inversion_dance.pt"]
+prompt = "A woman is dancing on the ground near a pool."
+layer_idx = 10
 
-video_path = ["data/moft/direction_down_49_scene1.mp4",
-              "data/moft/direction_down_49_scene2.mp4",
-              "data/moft/direction_up_49_scene1.mp4",
-              "data/moft/direction_up_49_scene2.mp4",
-              "data/moft/direction_right_49_scene1.mp4",
-              "data/moft/direction_right_49_scene2.mp4",
-              "data/moft/direction_left_49_scene1.mp4",
-              "data/moft/direction_left_49_scene2.mp4",
-              "data/moft/direction_still_49_scene1.mp4",
-              "data/moft/direction_still_49_scene2.mp4",]
+video_path = ["data/dance/videos/dance-jump.mp4"]
+outpath = ["outputs/inversion_dance.pt"]
 
-outpath = ["outputs/inter_feat/direction_down_49_scene1.pt",
-           "outputs/inter_feat/direction_down_49_scene2.pt",
-           "outputs/inter_feat/direction_up_49_scene1.pt",
-           "outputs/inter_feat/direction_up_49_scene2.pt",
-           "outputs/inter_feat/direction_right_49_scene1.pt",
-           "outputs/inter_feat/direction_right_49_scene2.pt",
-           "outputs/inter_feat/direction_left_49_scene1.pt",
-           "outputs/inter_feat/direction_left_49_scene2.pt",
-           "outputs/inter_feat/direction_still_49_scene1.pt",
-           "outputs/inter_feat/direction_still_49_scene2.pt",]
+# video_path = ["data/moft/direction_down_49_scene1.mp4",
+#               "data/moft/direction_down_49_scene2.mp4",
+#               "data/moft/direction_up_49_scene1.mp4",
+#               "data/moft/direction_up_49_scene2.mp4",
+#               "data/moft/direction_right_49_scene1.mp4",
+#               "data/moft/direction_right_49_scene2.mp4",
+#               "data/moft/direction_left_49_scene1.mp4",
+#               "data/moft/direction_left_49_scene2.mp4",
+#               "data/moft/direction_still_49_scene1.mp4",
+#               "data/moft/direction_still_49_scene2.mp4",]
+
+# outpath = [f"outputs/inter_feat/{layer_idx}/direction_down_49_scene1.pt",
+#            f"outputs/inter_feat/{layer_idx}/direction_down_49_scene2.pt",
+#            f"outputs/inter_feat/{layer_idx}/direction_up_49_scene1.pt",
+#            f"outputs/inter_feat/{layer_idx}/direction_up_49_scene2.pt",
+#            f"outputs/inter_feat/{layer_idx}/direction_right_49_scene1.pt",
+#            f"outputs/inter_feat/{layer_idx}/direction_right_49_scene2.pt",
+#            f"outputs/inter_feat/{layer_idx}/direction_left_49_scene1.pt",
+#            f"outputs/inter_feat/{layer_idx}/direction_left_49_scene2.pt",
+#            f"outputs/inter_feat/{layer_idx}/direction_still_49_scene1.pt",
+#            f"outputs/inter_feat/{layer_idx}/direction_still_49_scene2.pt",]
+
+dir_path = f"outputs/inter_feat/{layer_idx}"
+os.makedirs(dir_path, exist_ok=True)
 
 pretrained_model_name_or_path = "THUDM/CogVideoX-5b"
-prompt = ""
-layer_idx = [0]
 pipeline = load_pipeline(pretrained_model_name_or_path)
-do_inversion(pipeline, prompt, layer_idx, video_path, outpath)
+do_inversion(pipeline, prompt, [layer_idx], video_path, outpath)
 
-data_list = ["outputs/inter_feat/direction_down_49_scene1.pt",
-             "outputs/inter_feat/direction_down_49_scene2.pt",
-             "outputs/inter_feat/direction_up_49_scene1.pt",
-             "outputs/inter_feat/direction_up_49_scene2.pt",
-             "outputs/inter_feat/direction_right_49_scene1.pt",
-             "outputs/inter_feat/direction_right_49_scene2.pt",
-             "outputs/inter_feat/direction_left_49_scene1.pt",
-             "outputs/inter_feat/direction_left_49_scene2.pt",
-             "outputs/inter_feat/direction_still_49_scene1.pt",
-             "outputs/inter_feat/direction_still_49_scene2.pt",]
+data_list = [f"outputs/inter_feat/{layer_idx}/direction_down_49_scene1.pt",
+             f"outputs/inter_feat/{layer_idx}/direction_down_49_scene2.pt",
+             f"outputs/inter_feat/{layer_idx}/direction_up_49_scene1.pt",
+             f"outputs/inter_feat/{layer_idx}/direction_up_49_scene2.pt",
+             f"outputs/inter_feat/{layer_idx}/direction_right_49_scene1.pt",
+             f"outputs/inter_feat/{layer_idx}/direction_right_49_scene2.pt",
+             f"outputs/inter_feat/{layer_idx}/direction_left_49_scene1.pt",
+             f"outputs/inter_feat/{layer_idx}/direction_left_49_scene2.pt",
+             f"outputs/inter_feat/{layer_idx}/direction_still_49_scene1.pt",
+             f"outputs/inter_feat/{layer_idx}/direction_still_49_scene2.pt",]
 
 total_data_num = len(data_list)
 
@@ -118,6 +121,6 @@ for i in range(total_data_num):
 plt.legend(handles=handles, bbox_to_anchor=(1.05, 1.0))
     
 plt.tight_layout()
-plt.savefig('outputs/pca_moft_wo_ccr.png')
+plt.savefig(f'outputs/pca_moft_wo_ccr_layer_{layer_idx}.png')
 plt.show()
 plt.close()

@@ -46,10 +46,10 @@ class MyCogVideoXPipeline(CogVideoXPipeline):
         latents, inter_feat = self.run_ddim_inversion(video, prompts, self.scheduler, layer_idx=layer_idx, return_intermediates=True)
 
         last_latent = latents[-1]
-        # print(f"last latent's shape: {last_latent.shape}")
-        # torch.save(last_latent, outpath)
-        inter_feat = sum([inter_feat[i][0] for i in range(len(inter_feat))]) / len(inter_feat)   # [B * F, C, H, W]
-        torch.save(inter_feat, outpath)
+        print(f"last latent's shape: {last_latent.shape}")
+        torch.save(last_latent, outpath)
+        # inter_feat = sum([inter_feat[i][0] for i in range(len(inter_feat))]) / len(inter_feat)   # [B * F, C, H, W]
+        # torch.save(inter_feat, outpath)
 
     def run_ddim_inversion(self, image, prompt, scheduler, pred_step=None, layer_idx=[0], return_intermediates=False):
         inversioner = DDIMInversion(self,

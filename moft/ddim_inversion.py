@@ -18,7 +18,7 @@ class DDIMInversion:
                  cfg=False,
                  **kwargs):
         self.model = model
-        self.num_ddim_steps = kwargs.pop('num_ddim_steps', 25)
+        self.num_ddim_steps = kwargs.pop('num_ddim_steps', 999)
         self.guidance_scale = kwargs.pop('guidance_scale', 7.5)
         # self.tokenizer = self.model.tokenizer
         self.model.scheduler = scheduler
@@ -55,20 +55,22 @@ class DDIMInversion:
             assert len(timestep.shape) <= 1, f"expected timestep with len(timestep.shape) <= 1, but got length {len(timestep.shape)}"
             timestep = timestep.item()
 
-        timestep, next_timestep = min(
-            timestep - self.scheduler.num_train_timesteps //
-            self.scheduler.num_inference_steps, 999), timestep
+        # timestep, next_timestep = min(
+        #     timestep - self.scheduler.num_train_timesteps //
+        #     self.scheduler.num_inference_steps, 999), timestep
+        
+        next_timestep = min(timestep + self.scheduler.num_train_timesteps // self.scheduler.num_inference_steps, 999)
         
         alpha_prod_t = self.scheduler.alphas_cumprod[
             timestep] if timestep >= 0 else self.scheduler.final_alpha_cumprod
-        alpha_prod_t_next = self.scheduler.alphas_cumprod[next_timestep]
+        alpha_prod_t_plus_1 = self.scheduler.alphas_cumprod[next_timestep]
         beta_prod_t = 1 - alpha_prod_t
-        beta_prod_t_next = 1 - alpha_prod_t_next
+        beta_prod_t_plus_1 = 1 - alpha_prod_t_plus_1
 
         x_0_pred = alpha_prod_t ** 0.5 * sample - beta_prod_t ** 0.5 * model_output
         eps_pred = alpha_prod_t ** 0.5 * model_output + beta_prod_t ** 0.5 * sample
-        x_next_timestep = (beta_prod_t_next) ** 0.5 * eps_pred + (alpha_prod_t_next) ** 0.5 * x_0_pred
-        return x_next_timestep
+        x_t_plus_1 = (beta_prod_t_plus_1) ** 0.5 * eps_pred + (alpha_prod_t_plus_1) ** 0.5 * x_0_pred
+        return x_t_plus_1
 
     def forward_transformer_features(self, z, t, encoder_hidden_states, layer_idx=[0], interp_res_h=256, interp_res_w=256):
         transformer_output, all_intermediate_features = self.model.transformer(
@@ -162,8 +164,11 @@ class DDIMInversion:
             if pred_step and i >= pred_step:
                 break
 
-            t = self.model.scheduler.timesteps[
-                len(self.model.scheduler.timesteps) - i - 1][None].to(self.model._execution_device)
+            if i == 0:
+                t = torch.tensor([0]).to(self.model._execution_device)
+            else:
+                t = self.model.scheduler.timesteps[
+                    len(self.model.scheduler.timesteps) - i - 1][None].to(self.model._execution_device)
 
             if self.cfg:
                 latent_model_input = torch.cat([latent] * 2)
@@ -190,7 +195,7 @@ class DDIMInversion:
     @torch.no_grad()
     def ddim_inversion(self, image=None, latent=None, pred_step=None, layer_idx=[0], return_intermediates=False):
         if latent is None:
-            latent = self.model.vae.encode(image).latent_dist.sample()
+            latent = self.model.vae.encode(image).latent_dist.sample()  # [B, C, F, H, W]
             latent = latent * self.model.vae.config.scaling_factor
             latent = latent.transpose(1, 2)
         ddim_latents, inter_feat = self.ddim_loop(latent, pred_step=pred_step, layer_idx=layer_idx, return_intermediates=return_intermediates)
