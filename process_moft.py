@@ -10,11 +10,11 @@ from diffusers.utils import export_to_video
 from moft.utils import load_pipeline, do_inversion
 
 
-prompt = "A woman is dancing on the ground near a pool."
+prompt = ""
 layer_idx = 10
 
-video_path = ["data/dance/videos/dance-jump.mp4"]
-outpath = ["outputs/inversion_dance.pt"]
+# video_path = ["data/dance/videos/dance-jump.mp4"]
+# outpath = ["outputs/inversion_dance.pt"]
 
 # video_path = ["data/moft/direction_down_49_scene1.mp4",
 #               "data/moft/direction_down_49_scene2.mp4",
@@ -38,12 +38,12 @@ outpath = ["outputs/inversion_dance.pt"]
 #            f"outputs/inter_feat/{layer_idx}/direction_still_49_scene1.pt",
 #            f"outputs/inter_feat/{layer_idx}/direction_still_49_scene2.pt",]
 
-dir_path = f"outputs/inter_feat/{layer_idx}"
-os.makedirs(dir_path, exist_ok=True)
+# dir_path = f"outputs/inter_feat/{layer_idx}"
+# os.makedirs(dir_path, exist_ok=True)
 
-pretrained_model_name_or_path = "THUDM/CogVideoX-5b"
-pipeline = load_pipeline(pretrained_model_name_or_path)
-do_inversion(pipeline, prompt, [layer_idx], video_path, outpath)
+# pretrained_model_name_or_path = "THUDM/CogVideoX-5b"
+# pipeline = load_pipeline(pretrained_model_name_or_path)
+# do_inversion(pipeline, prompt, [layer_idx], video_path, outpath)
 
 data_list = [f"outputs/inter_feat/{layer_idx}/direction_down_49_scene1.pt",
              f"outputs/inter_feat/{layer_idx}/direction_down_49_scene2.pt",
@@ -70,7 +70,7 @@ for i, path in enumerate(data_list):
     data = data[:, :, h // 2 - crop_size // 2: h // 2 + crop_size // 2, w // 2 - crop_size // 2: w // 2 + crop_size // 2]
 
     data = data.reshape(frame_num, c, crop_size, crop_size)
-    # data = data - data.mean(dim=0, keepdim=True)  # remove the content feature
+    data = data - data.mean(dim=0, keepdim=True)  # remove the content feature
     data = data[0]
     data = data.reshape(c, crop_size, crop_size)
     data = data[None]
@@ -121,6 +121,6 @@ for i in range(total_data_num):
 plt.legend(handles=handles, bbox_to_anchor=(1.05, 1.0))
     
 plt.tight_layout()
-plt.savefig(f'outputs/pca_moft_wo_ccr_layer_{layer_idx}.png')
+plt.savefig(f'outputs/pca_moft_w_ccr_layer_{layer_idx}.png')
 plt.show()
 plt.close()
