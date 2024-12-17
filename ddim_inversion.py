@@ -116,40 +116,6 @@ class Preprocess(nn.Module):
             if save_latents:
                 torch.save(latent.clone().detach().cpu(), os.path.join(save_path, f"noisy_latents_{t.item()}.pt"))
         return latent
-    
-    @torch.no_grad()
-    def denoise(self, cond, latent, save_path, reverse=True, save_latents=True):
-        if reverse:
-            timesteps = reversed(self.scheduler.timesteps).to(device=latent.device, dtype=latent.dtype)
-        else:
-            timesteps = self.scheduler.timesteps.to(device=latent.device, dtype=latent.dtype)
-
-        iterator = zip(timesteps[:-1], timesteps[1:])
-        for t_curr, t_next in tqdm(iterator, total=len(timesteps)-1):
-            t_curr = t_curr.expand(latent.shape[0])
-            v_predict = self.transformer(
-                hidden_states=latent, 
-                timestep=t_curr, 
-                encoder_hidden_states=cond,
-            )[0]
-
-            latent_mid = latent + (t_next - t_curr) / 2 * v_predict
-
-            t_mid = t_curr + (t_next - t_curr) // 2
-            t_mid = t_mid.expand(latent.shape[0])
-            v_predict_mid = self.transformer(
-                hidden_states=latent_mid, 
-                timestep=t_mid,
-                encoder_hidden_states=cond,
-            )[0]
-
-            first_order = (v_predict_mid - v_predict) / ((t_mid - t_curr) / 2)
-            latent = latent + (t_next - t_curr) * v_predict + 0.5 * (t_next - t_curr) ** 2 * first_order
-
-        if save_latents:
-            torch.save(latent, os.path.join(save_path, "noise.pt"))
-
-        return latent
 
     @torch.no_grad()
     def ddim_sample(self, x, cond):
@@ -220,11 +186,9 @@ class Preprocess(nn.Module):
 
         latent = latent.transpose(1, 2).to(dtype=self.transformer.dtype, device=self.transformer.device)
         inverted_x = self.ddim_inversion(cond, latent, save_path, save_latents=True)
-        # inverted_x = self.denoise(cond, latent, save_path, reverse=True, save_latents=True)
 
         if self.config["save_ddim_reconstruction"]:
             latent_reconstruction = self.ddim_sample(inverted_x, cond)
-            latent_reconstruction = self.denoise(cond, inverted_x, save_path, reverse=False, save_latents=False)
             video = self.pipeline.decode_latents(latent_reconstruction)
             video = self.pipeline.video_processor.postprocess_video(video=video, output_type="pil")
             export_to_video(video[0], "reconstruct.mp4")
