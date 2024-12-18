@@ -833,9 +833,9 @@ class MyRegionCogVideoXPipeline(CogVideoXPipeline):
 
         region_prompt_embs = []
         for region_prompt in region_prompts:
-            region_prompt_emb, negative_region_prompt_emb  = self.encode_prompt(
+            region_prompt_emb, negative_region_prompt_emb = self.encode_prompt(
                 prompt=region_prompt,
-                negative_prompt=negative_prompt
+                negative_prompt=negative_prompt,
                 do_classifier_free_guidance=True,
                 max_sequence_length=max_sequence_length,
                 device=device
