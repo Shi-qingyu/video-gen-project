@@ -833,15 +833,16 @@ class MyRegionCogVideoXPipeline(CogVideoXPipeline):
 
         region_prompt_embs = []
         for region_prompt in region_prompts:
-            region_prompt_emb, _  = self.encode_prompt(
+            region_prompt_emb, negative_region_prompt_emb  = self.encode_prompt(
                 prompt=region_prompt,
-                do_classifier_free_guidance=False,
+                negative_prompt=negative_prompt
+                do_classifier_free_guidance=True,
                 max_sequence_length=max_sequence_length,
                 device=device
             )
+            region_prompt_emb = torch.cat([negative_region_prompt_emb, region_prompt_emb], dim=0)
             region_prompt_embs.append(region_prompt_emb)
-        region_prompt_embs = torch.cat(region_prompt_embs, dim=0).unsqueeze(0)
-        region_prompt_embs = region_prompt_embs.flatten(1, 2)   # [1, n * l, d]
+        region_prompt_embs = torch.cat(region_prompt_embs, dim=1)   # [2, n * l, d]
 
         attention_kwargs = {
             "region_prompt_embs": region_prompt_embs,
