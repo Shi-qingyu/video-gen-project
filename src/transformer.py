@@ -105,93 +105,6 @@ class MyCogVideoXBlock(nn.Module):
         return hidden_states, encoder_hidden_states
 
 
-class MyRegionCogVideoXBlock(nn.Module):
-    def __init__(
-        self,
-        dim: int,
-        num_attention_heads: int,
-        attention_head_dim: int,
-        time_embed_dim: int,
-        dropout: float = 0.0,
-        activation_fn: str = "gelu-approximate",
-        attention_bias: bool = False,
-        qk_norm: bool = True,
-        norm_elementwise_affine: bool = True,
-        norm_eps: float = 1e-5,
-        final_dropout: bool = True,
-        ff_inner_dim: Optional[int] = None,
-        ff_bias: bool = True,
-        attention_out_bias: bool = True,
-    ):
-        super().__init__()
-
-        # 1. Self Attention
-        self.norm1 = CogVideoXLayerNormZero(time_embed_dim, dim, norm_elementwise_affine, norm_eps, bias=True)
-
-        self.attn1 = Attention(
-            query_dim=dim,
-            dim_head=attention_head_dim,
-            heads=num_attention_heads,
-            qk_norm="layer_norm" if qk_norm else None,
-            eps=1e-6,
-            bias=attention_bias,
-            out_bias=attention_out_bias,
-            processor=RegionCogVideoXAttnProcessor2_0(),
-        )
-
-        # 2. Feed Forward
-        self.norm2 = CogVideoXLayerNormZero(time_embed_dim, dim, norm_elementwise_affine, norm_eps, bias=True)
-
-        self.ff = FeedForward(
-            dim,
-            dropout=dropout,
-            activation_fn=activation_fn,
-            final_dropout=final_dropout,
-            inner_dim=ff_inner_dim,
-            bias=ff_bias,
-        )
-
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        encoder_hidden_states: torch.Tensor,
-        temb: torch.Tensor,
-        image_rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-        attention_kwargs: Dict = None,
-    ) -> torch.Tensor:
-        text_seq_length = encoder_hidden_states.size(1)
-
-        # norm & modulate
-        norm_hidden_states, norm_encoder_hidden_states, gate_msa, enc_gate_msa = self.norm1(
-            hidden_states, encoder_hidden_states, temb
-        )
-
-        # attention
-        attn_hidden_states, attn_encoder_hidden_states = self.attn1(
-            hidden_states=norm_hidden_states,
-            encoder_hidden_states=norm_encoder_hidden_states,
-            image_rotary_emb=image_rotary_emb,
-            **attention_kwargs,
-        )
-
-        hidden_states = hidden_states + gate_msa * attn_hidden_states
-        encoder_hidden_states = encoder_hidden_states + enc_gate_msa * attn_encoder_hidden_states
-
-        # norm & modulate
-        norm_hidden_states, norm_encoder_hidden_states, gate_ff, enc_gate_ff = self.norm2(
-            hidden_states, encoder_hidden_states, temb
-        )
-
-        # feed-forward
-        norm_hidden_states = torch.cat([norm_encoder_hidden_states, norm_hidden_states], dim=1)
-        ff_output = self.ff(norm_hidden_states)
-
-        hidden_states = hidden_states + gate_ff * ff_output[:, text_seq_length:]
-        encoder_hidden_states = encoder_hidden_states + enc_gate_ff * ff_output[:, :text_seq_length]
-
-        return hidden_states, encoder_hidden_states
-    
-
 class MyCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
     _supports_gradient_checkpointing = True
 
@@ -367,6 +280,131 @@ class MyCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
         return Transformer2DModelOutput(sample=output)
 
 
+class MyCogVideoXLayerNormZero(nn.Module):
+    def __init__(
+        self,
+        conditioning_dim: int,
+        embedding_dim: int,
+        elementwise_affine: bool = True,
+        eps: float = 1e-5,
+        bias: bool = True,
+    ) -> None:
+        super().__init__()
+
+        self.silu = nn.SiLU()
+        self.linear = nn.Linear(conditioning_dim, 6 * embedding_dim, bias=bias)
+        self.norm = nn.LayerNorm(embedding_dim, eps=eps, elementwise_affine=elementwise_affine)
+
+    def forward(
+        self, hidden_states: torch.Tensor, encoder_hidden_states: torch.Tensor, temb: torch.Tensor, region_prompt_embs: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        shift, scale, gate, enc_shift, enc_scale, enc_gate = self.linear(self.silu(temb)).chunk(6, dim=1)
+        hidden_states = self.norm(hidden_states) * (1 + scale)[:, None, :] + shift[:, None, :]
+        encoder_hidden_states = self.norm(encoder_hidden_states) * (1 + enc_scale)[:, None, :] + enc_shift[:, None, :]
+        region_prompt_embs = self.norm(region_prompt_embs) * (1 + enc_scale)[:, None, :] + enc_shift[:, None, :]
+        return hidden_states, encoder_hidden_states, gate[:, None, :], enc_gate[:, None, :], region_prompt_embs
+
+
+class MyRegionCogVideoXBlock(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        num_attention_heads: int,
+        attention_head_dim: int,
+        time_embed_dim: int,
+        dropout: float = 0.0,
+        activation_fn: str = "gelu-approximate",
+        attention_bias: bool = False,
+        qk_norm: bool = True,
+        norm_elementwise_affine: bool = True,
+        norm_eps: float = 1e-5,
+        final_dropout: bool = True,
+        ff_inner_dim: Optional[int] = None,
+        ff_bias: bool = True,
+        attention_out_bias: bool = True,
+    ):
+        super().__init__()
+
+        # 1. Self Attention
+        self.norm1 = MyCogVideoXLayerNormZero(time_embed_dim, dim, norm_elementwise_affine, norm_eps, bias=True)
+
+        self.attn1 = Attention(
+            query_dim=dim,
+            dim_head=attention_head_dim,
+            heads=num_attention_heads,
+            qk_norm="layer_norm" if qk_norm else None,
+            eps=1e-6,
+            bias=attention_bias,
+            out_bias=attention_out_bias,
+            processor=RegionCogVideoXAttnProcessor2_0(),
+        )
+
+        # 2. Feed Forward
+        self.norm2 = MyCogVideoXLayerNormZero(time_embed_dim, dim, norm_elementwise_affine, norm_eps, bias=True)
+
+        self.ff = FeedForward(
+            dim,
+            dropout=dropout,
+            activation_fn=activation_fn,
+            final_dropout=final_dropout,
+            inner_dim=ff_inner_dim,
+            bias=ff_bias,
+        )
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        temb: torch.Tensor,
+        image_rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        region_prompt_embs: torch.Tensor = None,
+        region_masks: torch.Tensor = None,
+        base_ratio: int = None,
+        height: int = None,
+        width: int = None,
+        frames: int = None,
+    ) -> torch.Tensor:
+        text_seq_length = encoder_hidden_states.size(1)
+        region_prompt_length = region_prompt_embs.size(1)
+        
+        # norm & modulate
+        norm_hidden_states, norm_encoder_hidden_states, gate_msa, enc_gate_msa, region_prompt_embs = self.norm1(
+            hidden_states, encoder_hidden_states, temb, region_prompt_embs
+        )
+
+        # attention
+        attn_hidden_states, attn_encoder_hidden_states, region_prompt_embs = self.attn1(
+            hidden_states=norm_hidden_states,
+            encoder_hidden_states=norm_encoder_hidden_states,
+            image_rotary_emb=image_rotary_emb,
+            region_prompt_embs=region_prompt_embs,
+            region_masks=region_masks,
+            base_ratio=base_ratio,
+            height=height,
+            width=width,
+            num_frames=frames,
+        )
+
+        hidden_states = hidden_states + gate_msa * attn_hidden_states
+        encoder_hidden_states = encoder_hidden_states + enc_gate_msa * attn_encoder_hidden_states
+        region_prompt_embs = region_prompt_embs + enc_gate_msa * region_prompt_embs
+
+        # norm & modulate
+        norm_hidden_states, norm_encoder_hidden_states, gate_ff, enc_gate_ff, region_prompt_embs = self.norm2(
+            hidden_states, encoder_hidden_states, temb, region_prompt_embs
+        )
+
+        # feed-forward
+        norm_hidden_states = torch.cat([norm_encoder_hidden_states, region_prompt_embs, norm_hidden_states], dim=1)
+        ff_output = self.ff(norm_hidden_states)
+
+        hidden_states = hidden_states + gate_ff * ff_output[:, text_seq_length + region_prompt_length:]
+        encoder_hidden_states = encoder_hidden_states + enc_gate_ff * ff_output[:, :text_seq_length]
+        region_prompt_embs = region_prompt_embs + enc_gate_ff * ff_output[:, text_seq_length: text_seq_length + region_prompt_length]
+
+        return hidden_states, encoder_hidden_states, region_prompt_embs
+
+
 class MyRegionCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
     _supports_gradient_checkpointing = True
 
@@ -453,7 +491,9 @@ class MyRegionCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
         timestep: Union[int, float, torch.LongTensor],
         timestep_cond: Optional[torch.Tensor] = None,
         image_rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-        attention_kwargs: Optional[Dict[str, Any]] = None,
+        region_prompt_embs: torch.Tensor = None,
+        region_masks: torch.Tensor = None,
+        base_ratio: int = None,
         return_dict: bool = True,
     ):
         if attention_kwargs is not None:
@@ -463,6 +503,8 @@ class MyRegionCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
             lora_scale = 1.0
 
         batch_size, num_frames, channels, height, width = hidden_states.shape
+        latent_height = height // self.patch_embed.patch_size
+        latent_width = width // self.patch_embed.patch_size
 
         # 1. Time embedding
         timesteps = timestep
@@ -503,12 +545,17 @@ class MyRegionCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
                     **ckpt_kwargs,
                 )
             else:
-                hidden_states, encoder_hidden_states = block(
+                hidden_states, encoder_hidden_states, region_prompt_embs = block(
                     hidden_states=hidden_states,
                     encoder_hidden_states=encoder_hidden_states,
                     temb=emb,
                     image_rotary_emb=image_rotary_emb,
-                    attention_kwargs=attention_kwargs
+                    region_prompt_embs=region_prompt_embs,
+                    region_masks=region_masks,
+                    base_ratio=base_ratio,
+                    height=latent_height,
+                    width=latent_width,
+                    frames=num_frames,
                 )
 
         if not self.config.use_rotary_positional_embeddings:

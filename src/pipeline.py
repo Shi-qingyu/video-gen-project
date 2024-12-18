@@ -847,9 +847,6 @@ class MyRegionCogVideoXPipeline(CogVideoXPipeline):
             "region_prompt_embs": region_prompt_embs,
             "region_masks": region_masks,
             "base_ratio": base_ratio,
-            "height": latent_height,
-            "width": latent_width,
-            "num_frames": latent_frames,
         }
 
         # 2. Default call parameters
