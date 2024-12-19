@@ -496,12 +496,6 @@ class MyRegionCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
         base_ratio: int = None,
         return_dict: bool = True,
     ):
-        if attention_kwargs is not None:
-            attention_kwargs = attention_kwargs.copy()
-            lora_scale = attention_kwargs.pop("scale", 1.0)
-        else:
-            lora_scale = 1.0
-
         batch_size, num_frames, channels, height, width = hidden_states.shape
         latent_height = height // self.patch_embed.patch_size
         latent_width = width // self.patch_embed.patch_size
@@ -518,6 +512,7 @@ class MyRegionCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
 
         # 2. Patch embedding
         hidden_states = self.patch_embed(encoder_hidden_states, hidden_states)
+        region_prompt_embs = self.patch_embed.text_proj(region_prompt_embs)
         hidden_states = self.embedding_dropout(hidden_states)
 
         text_seq_length = encoder_hidden_states.shape[1]
@@ -526,37 +521,18 @@ class MyRegionCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
 
         # 3. Transformer blocks
         for i, block in enumerate(self.transformer_blocks):
-            if self.training and self.gradient_checkpointing:
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        return module(*inputs)
-
-                    return custom_forward
-
-                ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
-                hidden_states, encoder_hidden_states = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(block),
-                    hidden_states,
-                    encoder_hidden_states,
-                    emb,
-                    image_rotary_emb,
-                    attention_kwargs,
-                    **ckpt_kwargs,
-                )
-            else:
-                hidden_states, encoder_hidden_states, region_prompt_embs = block(
-                    hidden_states=hidden_states,
-                    encoder_hidden_states=encoder_hidden_states,
-                    temb=emb,
-                    image_rotary_emb=image_rotary_emb,
-                    region_prompt_embs=region_prompt_embs,
-                    region_masks=region_masks,
-                    base_ratio=base_ratio,
-                    height=latent_height,
-                    width=latent_width,
-                    frames=num_frames,
-                )
+            hidden_states, encoder_hidden_states, region_prompt_embs = block(
+                hidden_states=hidden_states,
+                encoder_hidden_states=encoder_hidden_states,
+                temb=emb,
+                image_rotary_emb=image_rotary_emb,
+                region_prompt_embs=region_prompt_embs,
+                region_masks=region_masks,
+                base_ratio=base_ratio,
+                height=latent_height,
+                width=latent_width,
+                frames=num_frames,
+            )
 
         if not self.config.use_rotary_positional_embeddings:
             # CogVideoX-2B
@@ -578,10 +554,6 @@ class MyRegionCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
         p = self.config.patch_size
         output = hidden_states.reshape(batch_size, num_frames, height // p, width // p, -1, p, p)
         output = output.permute(0, 1, 4, 2, 5, 3, 6).flatten(5, 6).flatten(3, 4)
-
-        if USE_PEFT_BACKEND:
-            # remove `lora_scale` from each PEFT layer
-            unscale_lora_layers(self, lora_scale)
 
         if not return_dict:
             return (output,)

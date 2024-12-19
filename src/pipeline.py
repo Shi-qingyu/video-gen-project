@@ -810,6 +810,7 @@ class MyRegionCogVideoXPipeline(CogVideoXPipeline):
             callback_on_step_end_tensor_inputs = callback_on_step_end.tensor_inputs
 
         num_videos_per_prompt = 1
+        device = self._execution_device
 
         # 1. Check inputs. Raise error if not correct
         self.check_inputs(
@@ -857,8 +858,6 @@ class MyRegionCogVideoXPipeline(CogVideoXPipeline):
             batch_size = len(prompt)
         else:
             batch_size = prompt_embeds.shape[0]
-
-        device = self._execution_device
 
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
         # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
@@ -929,7 +928,9 @@ class MyRegionCogVideoXPipeline(CogVideoXPipeline):
                     encoder_hidden_states=prompt_embeds,
                     timestep=timestep,
                     image_rotary_emb=image_rotary_emb,
-                    attention_kwargs=attention_kwargs,
+                    region_prompt_embs=region_prompt_embs,
+                    region_masks=region_masks,
+                    base_ratio=base_ratio,
                     return_dict=False,
                 )[0]
                 noise_pred = noise_pred.float()

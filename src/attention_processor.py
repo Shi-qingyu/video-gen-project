@@ -389,6 +389,10 @@ class RegionCogVideoXAttnProcessor2_0(CogVideoXAttnProcessor2_0):
         text_seq_length,
         device,
     ):
+        """
+        Args:
+            region_masks: shape [1, n, t, h, w]
+        """
         region_masks = region_masks.to(device=device, dtype=torch.bool)
         attention_mask = torch.zeros(
             (query_length, num_regions * text_seq_length + num_frames * height * width), dtype=torch.bool, device=device
@@ -405,7 +409,175 @@ class RegionCogVideoXAttnProcessor2_0(CogVideoXAttnProcessor2_0):
             for i in range(num_regions):
                 region_mask = region_masks[0, i, frame_idx]    # [h, w]
                 region_mask = region_mask.flatten()    # [hw]
-                flatten_background = flatten_background - region_mask
+                flatten_background = torch.logical_xor(flatten_background, region_mask)
+
+                region_mask_for_text = region_mask[:, None].repeat(1, text_seq_length)
+                attention_mask[:, i * text_seq_length: (i + 1) * text_seq_length] = region_mask_for_text
+
+                region_masks_for_self = region_masks[0, i]  # [t, h, w]
+                region_masks_for_self = region_masks_for_self.flatten()
+                self_attention_mask = region_mask[:, None] * region_masks_for_self[None, :] # [hw, thw]
+                attention_mask[:, num_regions * text_seq_length:] += self_attention_mask
+            
+            flatten_background = (flatten_background > 0).to(torch.bool)
+            flatten_background_all_frame = (region_masks.sum(1).flatten() < 1).to(torch.bool)
+            bachground_mask = flatten_background[:, None] * flatten_background_all_frame[None, :]   # [hw, thw]
+
+            attention_mask[:, num_regions * text_seq_length:] += bachground_mask
+            attention_mask = (attention_mask > 0).to(torch.bool)
+        
+        return attention_mask
+
+    def __call__(
+        self,
+        attn: Attention,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        attention_mask: torch.Tensor = None,
+        image_rotary_emb: torch.Tensor = None,
+        region_prompt_embs: Optional[torch.Tensor] = None,
+        region_masks: torch.Tensor = None,
+        base_ratio: Optional[int] = None,
+        height: int = None,
+        width: int = None,
+        num_frames: int = None,
+    ):
+        """
+        Args:
+            hidden_states.shape = [1, thw, d]
+            encoder_hidden_states = [1, l, d]
+            region_prompt_embs = [1, n * l, d]
+            region_masks = [1, n, t, h, w]
+        """
+        base_hidden_states, encoder_hidden_states = super().__call__(
+            attn,
+            hidden_states,
+            encoder_hidden_states,
+            attention_mask,
+            image_rotary_emb,
+        )
+        if base_ratio is None and region_prompt_embs is None:
+            return base_hidden_states, encoder_hidden_states, None
+        else:    
+            text_seq_length = encoder_hidden_states.size(1)
+            num_regions = region_prompt_embs.size(1) // text_seq_length
+
+            hidden_states = torch.cat([region_prompt_embs, hidden_states], dim=1)   # [1, n * l + thw, d]
+
+            batch_size, sequence_length, _ = (
+                hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
+            )
+
+            query = attn.to_q(hidden_states)
+            key = attn.to_k(hidden_states)
+            value = attn.to_v(hidden_states)
+
+            inner_dim = key.shape[-1]
+            head_dim = inner_dim // attn.heads
+
+            query = query.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
+            key = key.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
+            value = value.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
+
+            if attn.norm_q is not None:
+                query = attn.norm_q(query)
+            if attn.norm_k is not None:
+                key = attn.norm_k(key)
+
+            # Apply RoPE if needed
+            if image_rotary_emb is not None:
+                from diffusers.models.embeddings import apply_rotary_emb
+
+                query[:, :, num_regions * text_seq_length:] = apply_rotary_emb(query[:, :, num_regions * text_seq_length:], image_rotary_emb)
+                if not attn.is_cross_attention:
+                    key[:, :, num_regions * text_seq_length:] = apply_rotary_emb(key[:, :, num_regions * text_seq_length:], image_rotary_emb)
+        
+            hidden_state_blocks = []
+            block_size = height * width
+            block_num = int((query.shape[2] - num_regions * text_seq_length) // block_size + 1)
+            block_ids = [(num_regions * text_seq_length + i * block_size) for i in range(block_num)]
+
+            start_idx = 0
+            for i, idx in enumerate(block_ids):
+                end_idx = idx
+                query_tmp = query[:, :, start_idx: end_idx]
+                query_length = end_idx - start_idx
+                import time
+
+                attention_mask = self.prepare_attention_mask(
+                    region_masks=region_masks,
+                    height=height,
+                    width=width,
+                    num_frames=num_frames,
+                    query_length=query_length,
+                    frame_idx=i-1,
+                    num_regions=num_regions,
+                    text_seq_length=text_seq_length,
+                    device=query.device,
+                )   # [query_len, key_len]
+
+                hidden_states_tmp = F.scaled_dot_product_attention(
+                    query_tmp, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+                )   # [1, h, query_len, head_dim]
+                
+                del attention_mask
+                gc.collect()
+                torch.cuda.empty_cache()
+
+                hidden_states_tmp = hidden_states_tmp.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
+                hidden_state_blocks.append(hidden_states_tmp)
+                start_idx = end_idx
+            
+            hidden_states = torch.cat(hidden_state_blocks, dim=1)   # (bs, seq_len, dim)
+
+            # linear proj
+            hidden_states = attn.to_out[0](hidden_states)
+            # dropout
+            hidden_states = attn.to_out[1](hidden_states)
+
+            region_prompt_embs, hidden_states = hidden_states.split(
+                [num_regions * text_seq_length, hidden_states.size(1) - num_regions * text_seq_length], dim=1
+            )
+
+            hidden_states = (1 - base_ratio) * hidden_states + base_ratio * base_hidden_states
+
+            return hidden_states, encoder_hidden_states, region_prompt_embs
+
+
+class RegionCogVideoXAttnProcessor2_0(CogVideoXAttnProcessor2_0):
+    def prepare_attention_mask(
+        self,
+        region_masks,
+        height,
+        width,
+        num_frames,
+        query_length,
+        frame_idx,
+        num_regions,
+        text_seq_length,
+        device,
+    ):
+        """
+        Args:
+            region_masks: shape [1, n, t, h, w]
+        """
+        region_masks = region_masks.to(device=device, dtype=torch.bool)
+        attention_mask = torch.zeros(
+            (query_length, num_regions * text_seq_length + num_frames * height * width), dtype=torch.bool, device=device
+        )
+        if query_length == num_regions * text_seq_length:
+            for i in range(num_regions):
+                attention_mask[i * text_seq_length: (i + 1) * text_seq_length, i * text_seq_length: (i + 1) * text_seq_length] = True
+                region_mask = region_masks[0, i]    # [t, h, w]
+                region_mask = region_mask.flatten()
+                region_mask = region_mask[None, :].repeat(text_seq_length, 1)
+                attention_mask[i * text_seq_length: (i + 1) * text_seq_length, num_regions * text_seq_length:] = region_mask
+        else:
+            flatten_background = torch.ones((height * width), device=device, dtype=torch.bool)
+            for i in range(num_regions):
+                region_mask = region_masks[0, i, frame_idx]    # [h, w]
+                region_mask = region_mask.flatten()    # [hw]
+                flatten_background = torch.logical_xor(flatten_background, region_mask)
 
                 region_mask_for_text = region_mask[:, None].repeat(1, text_seq_length)
                 attention_mask[:, i * text_seq_length: (i + 1) * text_seq_length] = region_mask_for_text

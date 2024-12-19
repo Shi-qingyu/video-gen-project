@@ -1,0 +1,48 @@
+from src.pipeline import MyRegionCogVideoXPipeline
+from src.transformer import MyRegionCogVideoXTransformer3DModel
+
+import json
+
+import torch
+
+device = "cuda"
+transformer = MyRegionCogVideoXTransformer3DModel.from_pretrained(
+    "THUDM/CogVideoX-5b",
+    subfolder="transformer",
+    torch_dtype=torch.bfloat16,
+).to(device)
+
+pipe = MyRegionCogVideoXPipeline.from_pretrained(
+    "THUDM/CogVideoX-5b",
+    transformer=transformer,
+    torch_dtype=torch.bfloat16,
+).to(device)
+
+with open("region_1.json", "r") as file:
+    config = json.load(file)
+
+region_prompts = config["region_prompts"]
+bboxes = torch.tensor(config["bboxes"])
+num_regions = bboxes.shape[0]
+height = transformer.config.sample_height // transformer.config.patch_size
+width = transformer.config.sample_width // transformer.config.patch_size
+frames = transformer.config.sample_frames // transformer.config.temporal_compression_ratio + 1
+region_masks = torch.zeros(size=(1, num_regions, frames, height, width), device=device)
+
+bboxes = bboxes // 8 // 2
+for i in range(num_regions):
+    for j in range(frames):
+        region_mask = torch.zeros(size=(height, width), device=device)
+        bbox = bboxes[i, j]
+        x1, y1, x2, y2 = bbox
+        region_mask[y1: y2, x1: x2] = True
+        region_masks[0, i, j] = region_mask
+
+global_prompt = "A dog and a cat is walking on the grassland."
+video = pipe(
+    prompt=global_prompt,
+    negative_prompt="",
+    region_prompts=region_prompts,
+    region_masks=region_masks,
+    base_ratio=0.2
+).frames[0]
