@@ -544,7 +544,7 @@ class RegionCogVideoXAttnProcessor2_0(CogVideoXAttnProcessor2_0):
             return hidden_states, encoder_hidden_states, region_prompt_embs
 
 
-class RegionCogVideoXAttnProcessor2_0(CogVideoXAttnProcessor2_0):
+class RegionCogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
     def prepare_attention_mask(
         self,
         region_masks,
@@ -660,43 +660,39 @@ class RegionCogVideoXAttnProcessor2_0(CogVideoXAttnProcessor2_0):
                 if not attn.is_cross_attention:
                     key[:, :, num_regions * text_seq_length:] = apply_rotary_emb(key[:, :, num_regions * text_seq_length:], image_rotary_emb)
         
-            hidden_state_blocks = []
-            block_size = height * width
-            block_num = int((query.shape[2] - num_regions * text_seq_length) // block_size + 1)
-            block_ids = [(num_regions * text_seq_length + i * block_size) for i in range(block_num)]
+            attention_mask = torch.zeros(size=(query.size(2), key.size(2)), device=query.device)
+            background_mask = torch.ones(size=(num_frames * height * width,), device=query.device)
 
-            start_idx = 0
-            for i, idx in enumerate(block_ids):
-                end_idx = idx
-                query_tmp = query[:, :, start_idx: end_idx]
-                query_length = end_idx - start_idx
-                import time
+            for i in range(num_regions):
+                attention_mask[i * text_seq_length: (i + 1) * text_seq_length, i * text_seq_length: (i + 1) * text_seq_length] = True
+                flatten_region_mask = region_masks[0, i].flatten()  # [thw]
 
-                attention_mask = self.prepare_attention_mask(
-                    region_masks=region_masks,
-                    height=height,
-                    width=width,
-                    num_frames=num_frames,
-                    query_length=query_length,
-                    frame_idx=i-1,
-                    num_regions=num_regions,
-                    text_seq_length=text_seq_length,
-                    device=query.device,
-                )   # [query_len, key_len]
+                cross_attention_mask = flatten_region_mask[None].repeat(text_seq_length, 1)
+                attention_mask[i * text_seq_length: (i + 1) * text_seq_length, num_regions * text_seq_length:] = cross_attention_mask
+                attention_mask[num_regions * text_seq_length: , i * text_seq_length: (i + 1) * text_seq_length] = cross_attention_mask.transpose(0, 1)
 
-                hidden_states_tmp = F.scaled_dot_product_attention(
-                    query_tmp, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-                )   # [1, h, query_len, head_dim]
-                
-                del attention_mask
-                gc.collect()
-                torch.cuda.empty_cache()
-
-                hidden_states_tmp = hidden_states_tmp.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
-                hidden_state_blocks.append(hidden_states_tmp)
-                start_idx = end_idx
+                background_mask = torch.logical_xor(background_mask, flatten_region_mask)
+                region_attention_mask = flatten_region_mask[:, None] * flatten_region_mask[None, :]
+                attention_mask[num_regions * text_seq_length:, num_regions * text_seq_length:] = torch.logical_or(
+                    attention_mask[num_regions * text_seq_length:, num_regions * text_seq_length:], region_attention_mask
+                )
             
-            hidden_states = torch.cat(hidden_state_blocks, dim=1)   # (bs, seq_len, dim)
+            background_attention_mask = background_mask[:, None] * background_mask[None, :]
+            attention_mask[num_regions * text_seq_length:, num_regions * text_seq_length:] = torch.logical_or(
+                attention_mask[num_regions * text_seq_length:, num_regions * text_seq_length:], background_attention_mask
+            )
+
+            attention_mask = attention_mask.to(torch.bool)
+
+            hidden_states = F.scaled_dot_product_attention(
+                query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+            )   # [1, h, query_len, head_dim]
+            
+            del attention_mask
+            gc.collect()
+            torch.cuda.empty_cache()
+
+            hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
 
             # linear proj
             hidden_states = attn.to_out[0](hidden_states)

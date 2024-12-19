@@ -778,6 +778,7 @@ class MyRegionCogVideoXPipeline(CogVideoXPipeline):
         negative_prompt: Optional[Union[str, List[str]]] = None,
         region_prompts: List[str] = None,   # length = n
         region_masks: torch.Tensor = None,  # 1, n, t, h, w
+        num_control_steps: int = 20,
         base_ratio: int = 0.2,
         height: int = 480,
         width: int = 720,
@@ -845,12 +846,6 @@ class MyRegionCogVideoXPipeline(CogVideoXPipeline):
             region_prompt_embs.append(region_prompt_emb)
         region_prompt_embs = torch.cat(region_prompt_embs, dim=1)   # [2, n * l, d]
 
-        attention_kwargs = {
-            "region_prompt_embs": region_prompt_embs,
-            "region_masks": region_masks,
-            "base_ratio": base_ratio,
-        }
-
         # 2. Default call parameters
         if prompt is not None and isinstance(prompt, str):
             batch_size = 1
@@ -913,6 +908,14 @@ class MyRegionCogVideoXPipeline(CogVideoXPipeline):
             # for DPM-solver++
             old_pred_original_sample = None
             for i, t in enumerate(timesteps):
+                
+                if i < num_control_steps:
+                    pass
+                else:
+                    base_ratio = None
+                    region_prompt_embs = None
+                    region_masks = None
+
                 if self.interrupt:
                     continue
 

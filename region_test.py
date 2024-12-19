@@ -5,6 +5,8 @@ import json
 
 import torch
 
+from diffusers.utils import export_to_video
+
 device = "cuda"
 transformer = MyRegionCogVideoXTransformer3DModel.from_pretrained(
     "THUDM/CogVideoX-5b",
@@ -46,3 +48,5 @@ video = pipe(
     region_masks=region_masks,
     base_ratio=0.2
 ).frames[0]
+
+export_to_video(video, "test.mp4", fps=8)

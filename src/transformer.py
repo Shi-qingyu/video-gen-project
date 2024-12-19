@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional, Tuple, Union
 import torch
 from torch import nn
 
-from .attention_processor import CogVideoXAttnProcessor3_0, RegionCogVideoXAttnProcessor2_0
+from .attention_processor import CogVideoXAttnProcessor3_0, RegionCogVideoXAttnProcessor2_0, RegionCogVideoXAttnProcessor3_0
 
 
 class MyCogVideoXBlock(nn.Module):
@@ -301,7 +301,10 @@ class MyCogVideoXLayerNormZero(nn.Module):
         shift, scale, gate, enc_shift, enc_scale, enc_gate = self.linear(self.silu(temb)).chunk(6, dim=1)
         hidden_states = self.norm(hidden_states) * (1 + scale)[:, None, :] + shift[:, None, :]
         encoder_hidden_states = self.norm(encoder_hidden_states) * (1 + enc_scale)[:, None, :] + enc_shift[:, None, :]
-        region_prompt_embs = self.norm(region_prompt_embs) * (1 + enc_scale)[:, None, :] + enc_shift[:, None, :]
+
+        if region_prompt_embs is not None:
+            region_prompt_embs = self.norm(region_prompt_embs) * (1 + enc_scale)[:, None, :] + enc_shift[:, None, :]
+
         return hidden_states, encoder_hidden_states, gate[:, None, :], enc_gate[:, None, :], region_prompt_embs
 
 
@@ -336,7 +339,7 @@ class MyRegionCogVideoXBlock(nn.Module):
             eps=1e-6,
             bias=attention_bias,
             out_bias=attention_out_bias,
-            processor=RegionCogVideoXAttnProcessor2_0(),
+            processor=RegionCogVideoXAttnProcessor3_0(),
         )
 
         # 2. Feed Forward
@@ -357,15 +360,16 @@ class MyRegionCogVideoXBlock(nn.Module):
         encoder_hidden_states: torch.Tensor,
         temb: torch.Tensor,
         image_rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-        region_prompt_embs: torch.Tensor = None,
-        region_masks: torch.Tensor = None,
-        base_ratio: int = None,
+        region_prompt_embs: Optional[torch.Tensor] = None,
+        region_masks: Optional[torch.Tensor] = None,
+        base_ratio: Optional[int] = None,
         height: int = None,
         width: int = None,
         frames: int = None,
     ) -> torch.Tensor:
         text_seq_length = encoder_hidden_states.size(1)
-        region_prompt_length = region_prompt_embs.size(1)
+        if region_prompt_embs is not None:
+            region_prompt_length = region_prompt_embs.size(1)
         
         # norm & modulate
         norm_hidden_states, norm_encoder_hidden_states, gate_msa, enc_gate_msa, region_prompt_embs = self.norm1(
@@ -387,20 +391,28 @@ class MyRegionCogVideoXBlock(nn.Module):
 
         hidden_states = hidden_states + gate_msa * attn_hidden_states
         encoder_hidden_states = encoder_hidden_states + enc_gate_msa * attn_encoder_hidden_states
-        region_prompt_embs = region_prompt_embs + enc_gate_msa * region_prompt_embs
+        if region_prompt_embs is not None:
+            region_prompt_embs = region_prompt_embs + enc_gate_msa * region_prompt_embs
 
         # norm & modulate
         norm_hidden_states, norm_encoder_hidden_states, gate_ff, enc_gate_ff, region_prompt_embs = self.norm2(
             hidden_states, encoder_hidden_states, temb, region_prompt_embs
         )
 
+        if region_prompt_embs is not None:
         # feed-forward
-        norm_hidden_states = torch.cat([norm_encoder_hidden_states, region_prompt_embs, norm_hidden_states], dim=1)
+            norm_hidden_states = torch.cat([norm_encoder_hidden_states, region_prompt_embs, norm_hidden_states], dim=1)
+        else:
+            norm_hidden_states = torch.cat([norm_encoder_hidden_states, norm_hidden_states], dim=1)
         ff_output = self.ff(norm_hidden_states)
 
-        hidden_states = hidden_states + gate_ff * ff_output[:, text_seq_length + region_prompt_length:]
+        if region_prompt_embs is not None:
+            hidden_states = hidden_states + gate_ff * ff_output[:, text_seq_length + region_prompt_length:]
+            region_prompt_embs = region_prompt_embs + enc_gate_ff * ff_output[:, text_seq_length: text_seq_length + region_prompt_length]
+        else:
+            hidden_states = hidden_states + gate_ff * ff_output[:, text_seq_length:]
+
         encoder_hidden_states = encoder_hidden_states + enc_gate_ff * ff_output[:, :text_seq_length]
-        region_prompt_embs = region_prompt_embs + enc_gate_ff * ff_output[:, text_seq_length: text_seq_length + region_prompt_length]
 
         return hidden_states, encoder_hidden_states, region_prompt_embs
 
@@ -491,9 +503,9 @@ class MyRegionCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
         timestep: Union[int, float, torch.LongTensor],
         timestep_cond: Optional[torch.Tensor] = None,
         image_rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-        region_prompt_embs: torch.Tensor = None,
-        region_masks: torch.Tensor = None,
-        base_ratio: int = None,
+        region_prompt_embs: Optional[torch.Tensor] = None,
+        region_masks: Optional[torch.Tensor] = None,
+        base_ratio: Optional[int] = None,
         return_dict: bool = True,
     ):
         batch_size, num_frames, channels, height, width = hidden_states.shape
@@ -512,12 +524,15 @@ class MyRegionCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
 
         # 2. Patch embedding
         hidden_states = self.patch_embed(encoder_hidden_states, hidden_states)
-        region_prompt_embs = self.patch_embed.text_proj(region_prompt_embs)
         hidden_states = self.embedding_dropout(hidden_states)
 
         text_seq_length = encoder_hidden_states.shape[1]
         encoder_hidden_states = hidden_states[:, :text_seq_length]
         hidden_states = hidden_states[:, text_seq_length:]
+
+        if region_prompt_embs is not None:
+            region_prompt_length = region_prompt_embs.shape[1]
+            region_prompt_embs = self.patch_embed.text_proj(region_prompt_embs)
 
         # 3. Transformer blocks
         for i, block in enumerate(self.transformer_blocks):
@@ -539,9 +554,15 @@ class MyRegionCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
             hidden_states = self.norm_final(hidden_states)
         else:
             # CogVideoX-5B
-            hidden_states = torch.cat([encoder_hidden_states, hidden_states], dim=1)
-            hidden_states = self.norm_final(hidden_states)
-            hidden_states = hidden_states[:, text_seq_length:]
+            if region_prompt_embs is not None:
+                hidden_states = torch.cat([encoder_hidden_states, region_prompt_embs, hidden_states], dim=1)
+                hidden_states = self.norm_final(hidden_states)
+                hidden_states = hidden_states[:, text_seq_length + region_prompt_length:]
+            else:
+                hidden_states = torch.cat([encoder_hidden_states, hidden_states], dim=1)
+                hidden_states = self.norm_final(hidden_states)
+                hidden_states = hidden_states[:, text_seq_length:]
+
 
         # 4. Final block
         hidden_states = self.norm_out(hidden_states, temb=emb)

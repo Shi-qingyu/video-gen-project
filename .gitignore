@@ -1,8 +1,7 @@
-/results/
-/outputs/
-/data/
-
 attention_map
 results
+outputs
+data
+
 .vscode
-./__pycache__
+*__pycache__
