@@ -545,57 +545,6 @@ class RegionCogVideoXAttnProcessor2_0(CogVideoXAttnProcessor2_0):
 
 
 class RegionCogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
-    def prepare_attention_mask(
-        self,
-        region_masks,
-        height,
-        width,
-        num_frames,
-        query_length,
-        frame_idx,
-        num_regions,
-        text_seq_length,
-        device,
-    ):
-        """
-        Args:
-            region_masks: shape [1, n, t, h, w]
-        """
-        region_masks = region_masks.to(device=device, dtype=torch.bool)
-        attention_mask = torch.zeros(
-            (query_length, num_regions * text_seq_length + num_frames * height * width), dtype=torch.bool, device=device
-        )
-        if query_length == num_regions * text_seq_length:
-            for i in range(num_regions):
-                attention_mask[i * text_seq_length: (i + 1) * text_seq_length, i * text_seq_length: (i + 1) * text_seq_length] = True
-                region_mask = region_masks[0, i]    # [t, h, w]
-                region_mask = region_mask.flatten()
-                region_mask = region_mask[None, :].repeat(text_seq_length, 1)
-                attention_mask[i * text_seq_length: (i + 1) * text_seq_length, num_regions * text_seq_length:] = region_mask
-        else:
-            flatten_background = torch.ones((height * width), device=device, dtype=torch.bool)
-            for i in range(num_regions):
-                region_mask = region_masks[0, i, frame_idx]    # [h, w]
-                region_mask = region_mask.flatten()    # [hw]
-                flatten_background = torch.logical_xor(flatten_background, region_mask)
-
-                region_mask_for_text = region_mask[:, None].repeat(1, text_seq_length)
-                attention_mask[:, i * text_seq_length: (i + 1) * text_seq_length] = region_mask_for_text
-
-                region_masks_for_self = region_masks[0, i]  # [t, h, w]
-                region_masks_for_self = region_masks_for_self.flatten()
-                self_attention_mask = region_mask[:, None] * region_masks_for_self[None, :] # [hw, thw]
-                attention_mask[:, num_regions * text_seq_length:] += self_attention_mask
-            
-            flatten_background = (flatten_background > 0).to(torch.bool)
-            flatten_background_all_frame = (region_masks.sum(1).flatten() < 1).to(torch.bool)
-            bachground_mask = flatten_background[:, None] * flatten_background_all_frame[None, :]   # [hw, thw]
-
-            attention_mask[:, num_regions * text_seq_length:] += bachground_mask
-            attention_mask = (attention_mask > 0).to(torch.bool)
-        
-        return attention_mask
-
     def __call__(
         self,
         attn: Attention,
@@ -661,17 +610,17 @@ class RegionCogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
                     key[:, :, num_regions * text_seq_length:] = apply_rotary_emb(key[:, :, num_regions * text_seq_length:], image_rotary_emb)
         
             attention_mask = torch.zeros(size=(query.size(2), key.size(2)), device=query.device)
-            background_mask = torch.ones(size=(num_frames * height * width,), device=query.device)
+            background_mask = region_masks[0, -1].flatten()
 
             for i in range(num_regions):
                 attention_mask[i * text_seq_length: (i + 1) * text_seq_length, i * text_seq_length: (i + 1) * text_seq_length] = True
+                
                 flatten_region_mask = region_masks[0, i].flatten()  # [thw]
-
                 cross_attention_mask = flatten_region_mask[None].repeat(text_seq_length, 1)
                 attention_mask[i * text_seq_length: (i + 1) * text_seq_length, num_regions * text_seq_length:] = cross_attention_mask
                 attention_mask[num_regions * text_seq_length: , i * text_seq_length: (i + 1) * text_seq_length] = cross_attention_mask.transpose(0, 1)
 
-                background_mask = torch.logical_xor(background_mask, flatten_region_mask)
+                # background_mask = torch.logical_xor(background_mask, flatten_region_mask)
                 region_attention_mask = flatten_region_mask[:, None] * flatten_region_mask[None, :]
                 attention_mask[num_regions * text_seq_length:, num_regions * text_seq_length:] = torch.logical_or(
                     attention_mask[num_regions * text_seq_length:, num_regions * text_seq_length:], region_attention_mask

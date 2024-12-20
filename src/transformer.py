@@ -372,16 +372,16 @@ class MyRegionCogVideoXBlock(nn.Module):
             region_prompt_length = region_prompt_embs.size(1)
         
         # norm & modulate
-        norm_hidden_states, norm_encoder_hidden_states, gate_msa, enc_gate_msa, region_prompt_embs = self.norm1(
+        norm_hidden_states, norm_encoder_hidden_states, gate_msa, enc_gate_msa, norm_region_prompt_embs = self.norm1(
             hidden_states, encoder_hidden_states, temb, region_prompt_embs
         )
 
         # attention
-        attn_hidden_states, attn_encoder_hidden_states, region_prompt_embs = self.attn1(
+        attn_hidden_states, attn_encoder_hidden_states, attn_region_prompt_embs = self.attn1(
             hidden_states=norm_hidden_states,
             encoder_hidden_states=norm_encoder_hidden_states,
             image_rotary_emb=image_rotary_emb,
-            region_prompt_embs=region_prompt_embs,
+            region_prompt_embs=norm_region_prompt_embs,
             region_masks=region_masks,
             base_ratio=base_ratio,
             height=height,
@@ -392,16 +392,16 @@ class MyRegionCogVideoXBlock(nn.Module):
         hidden_states = hidden_states + gate_msa * attn_hidden_states
         encoder_hidden_states = encoder_hidden_states + enc_gate_msa * attn_encoder_hidden_states
         if region_prompt_embs is not None:
-            region_prompt_embs = region_prompt_embs + enc_gate_msa * region_prompt_embs
+            region_prompt_embs = region_prompt_embs + enc_gate_msa * attn_region_prompt_embs
 
         # norm & modulate
-        norm_hidden_states, norm_encoder_hidden_states, gate_ff, enc_gate_ff, region_prompt_embs = self.norm2(
+        norm_hidden_states, norm_encoder_hidden_states, gate_ff, enc_gate_ff, norm_region_prompt_embs = self.norm2(
             hidden_states, encoder_hidden_states, temb, region_prompt_embs
         )
 
         if region_prompt_embs is not None:
         # feed-forward
-            norm_hidden_states = torch.cat([norm_encoder_hidden_states, region_prompt_embs, norm_hidden_states], dim=1)
+            norm_hidden_states = torch.cat([norm_encoder_hidden_states, norm_region_prompt_embs, norm_hidden_states], dim=1)
         else:
             norm_hidden_states = torch.cat([norm_encoder_hidden_states, norm_hidden_states], dim=1)
         ff_output = self.ff(norm_hidden_states)

@@ -842,7 +842,7 @@ class MyRegionCogVideoXPipeline(CogVideoXPipeline):
                 max_sequence_length=max_sequence_length,
                 device=device
             )
-            region_prompt_emb = torch.cat([negative_region_prompt_emb, region_prompt_emb], dim=0)
+            region_prompt_emb = torch.cat([negative_region_prompt_emb, region_prompt_emb], dim=0)   # [2, l, d]
             region_prompt_embs.append(region_prompt_emb)
         region_prompt_embs = torch.cat(region_prompt_embs, dim=1)   # [2, n * l, d]
 
