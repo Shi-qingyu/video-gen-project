@@ -20,11 +20,11 @@ pipe = MyRegionCogVideoXPipeline.from_pretrained(
     torch_dtype=torch.bfloat16,
 ).to(device)
 
-with open("region_1.json", "r") as file:
+with open("region_3.json", "r") as file:
     config = json.load(file)
 
 region_prompts = config["region_prompts"]
-bboxes = torch.tensor(config["bboxes"])
+bboxes = torch.tensor(config["bboxes"]) # [num_regions, num_frames, 4]
 num_regions = bboxes.shape[0]
 height = transformer.config.sample_height // transformer.config.patch_size
 width = transformer.config.sample_width // transformer.config.patch_size
@@ -47,15 +47,15 @@ background_mask = background_mask == 1
 region_prompts.append("A photo of a beach.")
 region_masks = torch.cat([region_masks, background_mask], dim=1)
 
-global_prompt = "A dog and a cat on the beach."
+global_prompt = "A dog is walking on the beach."
 video = pipe(
     prompt=global_prompt,
-    negative_prompt="",
+    negative_prompt="bad quality, blur, low resolution",
     region_prompts=region_prompts,
     region_masks=region_masks,
-    base_ratio=0.80,
-    num_control_steps=20,
+    base_ratio=0.7,
+    num_control_steps=10,
     generator=torch.Generator(device=device).manual_seed(42),
 ).frames[0]
 
-export_to_video(video, "test_0.8_20.mp4", fps=8)
+export_to_video(video, "region_3_0.7_10.mp4", fps=8)

@@ -8,12 +8,12 @@ from diffusers.models.attention_processor import CogVideoXAttnProcessor2_0, Atte
 
 
 class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
-
     def __init__(self, block_idx=None):
         super().__init__()
         self.layer_idx = block_idx
         self.attention_store = None
     
+
     def get_attention_scores(
         self, attn: Attention, query: torch.Tensor, key: torch.Tensor, attention_mask: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
@@ -76,15 +76,13 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
                 num_frames, height, width, -1 
             )
             _attention_map = attention_map.detach().clone().cpu()
-            # if self.block_idx == "0":
             self.attention_store.store(self.layer_idx, _attention_map)
         else:
-            if self.layer_idx == save_layer_idx:
-                attention_map = attention_map.reshape(
-                    height, width, -1
-                )
-                _attention_map = attention_map.detach().clone().cpu()
-                self.attention_store.store(self.layer_idx, _attention_map)
+            attention_map = attention_map.reshape(
+                height, width, -1
+            )
+            _attention_map = attention_map.detach().clone().cpu()
+            self.attention_store.store(self.layer_idx, _attention_map)
         
 
     def __call__(
@@ -144,9 +142,9 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
 
         attention_map = []
         start_idx = 0
-        save_text_cross_attention = True
+        save_text_cross_attention = False
         save_layer_idx = 40
-        save_block_idx = 1
+        save_query_frame_idx = 1
 
         for i, idx in enumerate(block_ids):
             end_idx = idx
@@ -159,7 +157,7 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
                 if save_text_cross_attention:
                     attention_map.append(attention_probs[attn.heads:, :, torch.tensor(word_ids, device=query.device, dtype=torch.int32)].mean(0))
                 else:
-                    if i == save_block_idx:
+                    if i == save_query_frame_idx:
                         attention_map.append(attention_probs[attn.heads:, :, text_seq_length:].mean(0)) # (1350, 17550)
 
             hidden_states_partial = torch.bmm(attention_probs, value)
@@ -447,23 +445,23 @@ class RegionCogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
 
             attention_mask = attention_mask.to(torch.bool)
 
-            # q_u, q_c = query.chunk(2)
-            # k_u, k_c = key.chunk(2)
-            # v_u, v_c = value.chunk(2)
+            q_u, q_c = query.chunk(2)
+            k_u, k_c = key.chunk(2)
+            v_u, v_c = value.chunk(2)
             
-            # hidden_states_u = F.scaled_dot_product_attention(
-            #     q_u, k_u, v_u, attn_mask=None, dropout_p=0.0, is_causal=False
-            # )
+            hidden_states_u = F.scaled_dot_product_attention(
+                q_u, k_u, v_u, attn_mask=None, dropout_p=0.0, is_causal=False
+            )
 
-            # hidden_states_c = F.scaled_dot_product_attention(
-            #     q_c, k_c, v_c, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-            # )
+            hidden_states_c = F.scaled_dot_product_attention(
+                q_c, k_c, v_c, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+            )
 
-            # hidden_states = torch.cat([hidden_states_u, hidden_states_c], dim=0)
+            hidden_states = torch.cat([hidden_states_u, hidden_states_c], dim=0)
 
-            hidden_states = F.scaled_dot_product_attention(
-                query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-            )   # [1, h, query_len, head_dim]
+            # hidden_states = F.scaled_dot_product_attention(
+            #     query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+            # )   # [1, h, query_len, head_dim]
             
             del attention_mask
             gc.collect()
