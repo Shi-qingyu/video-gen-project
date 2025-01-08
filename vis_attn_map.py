@@ -11,7 +11,7 @@ from diffusers.utils import export_to_video
 prompt = "A dog is playing with a puppy, realistic style."
 words = ["dog", "puppy"]
 bboxes = [[0.2, 0.3, 0.4, 0.7], [0.6, 0.3, 0.8, 0.7]]
-device = "cuda:0"
+device = "cuda:1"
 num_inference_steps = 50
 
 

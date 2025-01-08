@@ -7,7 +7,7 @@ import torch
 
 from diffusers.utils import export_to_video
 
-device = "cuda:3"
+device = "cuda:2"
 transformer = MyRegionCogVideoXTransformer3DModel.from_pretrained(
     "THUDM/CogVideoX-5b",
     subfolder="transformer",
@@ -53,9 +53,9 @@ video = pipe(
     negative_prompt="",
     region_prompts=region_prompts,
     region_masks=region_masks,
-    base_ratio=0.45,
-    num_control_steps=10,
-    generator=torch.Generator(device=device).manual_seed(0),
+    base_ratio=0.80,
+    num_control_steps=20,
+    generator=torch.Generator(device=device).manual_seed(42),
 ).frames[0]
 
-export_to_video(video, "test.mp4", fps=8)
+export_to_video(video, "test_0.8_20.mp4", fps=8)
