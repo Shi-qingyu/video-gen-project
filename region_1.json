@@ -4,8 +4,8 @@
         "cat"
     ],
     "region_prompts": [
-        "A dog is walking on the grassland happily",
-        "A cat is walking on the grassland happily"
+        "A dog is walking.",
+        "A cat is walking."
     ],
     "bboxes": [
         [
