@@ -30,7 +30,8 @@ class SpatialEmbedding(nn.Module):
         
         spatial_emb = spatial_emb.to(dtype=hidden_states.dtype, device=hidden_states.device)
         return hidden_states + spatial_emb[None]
-    
+
+
 class SpatialTemporalEmbedding(nn.Module):
     def __init__(self, height, width, frames, dim) -> None:
         super().__init__()
@@ -63,7 +64,8 @@ class SpatialTemporalEmbedding(nn.Module):
         emb = emb.to(dtype=hidden_states.dtype, device=hidden_states.device)
 
         return hidden_states + emb[None]
-    
+
+
 class MotionEmbeddingV2(nn.Module):
     def __init__(self, height, width, frames, dim) -> None:
         super().__init__()
@@ -99,7 +101,8 @@ class MotionEmbeddingV2(nn.Module):
         motion_emb = motion_emb.flatten(0, 1)   # (f * h * w, d)
 
         return hidden_states + motion_emb[None]
-    
+
+
 class MotionEmbeddingV3(nn.Module):
     def __init__(self, height, width, frames, dim) -> None:
         super().__init__()
@@ -182,11 +185,6 @@ def inject_motion_embedding(transformer: CogVideoXTransformer3DModel, train=True
 
             if train:
                 for name, param in motion_embedding.named_parameters():
-                    if version == "spatialtemporal":
-                        if "appearance_emb" in name:
-                            param.requires_grad_(False)
-                            continue
-                        
                     param.requires_grad_(True)
                     trainable_parameters.append(param)
                 assert len(trainable_parameters) > 0, f"There is no trainable parameter!"

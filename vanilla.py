@@ -7,8 +7,8 @@ from diffusers.utils import export_to_video
 from src.pipeline import MyInversionCogVideoXPipeline
 
 
-prompt = "A dog and a cat on the beach."
-seed = 0
+prompt = "A tank is driving in the desert."
+seed = 42
 device = "cuda:2"
 num_skip_steps = 100
 

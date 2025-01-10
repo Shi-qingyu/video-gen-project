@@ -1,6 +1,7 @@
 import decord
 decord.bridge.set_bridge("torch")
 
+import os
 from pathlib import Path
 import numpy as np
 from torchvision.io import read_image, write_png
@@ -46,3 +47,29 @@ def make_grid_for_frames(frame_dir):
             bank.append(read_image(image))
         image = make_grid(bank, nrow=13)
         write_png(image, f"test{object_id}.png")
+
+def video_to_frames(video_path):
+    video_reader = decord.VideoReader(video_path)
+    batch_ids = list(range(len(video_reader)))
+
+    frames = video_reader.get_batch(batch_ids)
+
+    frames_dir = video_path[:-4]
+    os.makedirs(frames_dir, exist_ok=True)
+
+    for i in range(len(frames)):
+        frame = frames[i]
+        frame = frame.permute(2, 0, 1)
+        filename = os.path.join(frames_dir, f"{i}.png")
+        write_png(frame, filename)
+
+def make_static_video(video_path):
+    tgt_path = video_path[:-4] + "_static.mp4" 
+    video_reader = decord.VideoReader(video_path, width=720, height=480)
+    first_frame = video_reader.get_batch([0])
+    frames = [first_frame[0].numpy() / 255 for _ in range(49)]
+    export_to_video(frames, tgt_path)
+
+
+if __name__ == "__main__":
+    make_static_video("data/horsejump/videos/horsejump-high.mp4")

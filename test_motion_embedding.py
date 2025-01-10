@@ -6,31 +6,31 @@ from diffusers.utils import export_to_video
 
 from src.motion_embedding import inject_and_load_motion_embedding
 
-prompt = "A tank is driving in the desert."
-seed = 0
-device = "cuda:3"
-# ckpt_path = "results/origin/checkpoint-500/motion_embedding.pth"
-# config = ckpt_path.split("/")[1]
+prompt = "A man riding a horse is jumping over a fence."
+seed = 42
+device = "cuda:2"
+ckpt_path = "results/lr_1e-3_spatial_horse_jump/checkpoint-100/motion_embedding.pth"
+config = ckpt_path.split("/")[1]
 
 pipe = CogVideoXPipeline.from_pretrained(
     "THUDM/CogVideoX-5b",
     torch_dtype=torch.bfloat16
 )
 
-# inject_and_load_motion_embedding(
-#     pipe.transformer,
-#     ckpt_path=ckpt_path, 
-#     version="spatial",
-#     train=True
-# )
+inject_and_load_motion_embedding(
+    pipe.transformer,
+    ckpt_path=ckpt_path, 
+    version="spatial",
+    train=True
+)
 
 pipe.to(device)
 pipe.vae.enable_tiling()
 
-lora_scaling = 128 / 128
-pipe.load_lora_weights("results/motion_vector_step_500_r_128-lr_1e-5_car_5b/checkpoint-500/pytorch_lora_weights.safetensors", adapter_name="cogvideox-lora")
-pipe.set_adapters(["cogvideox-lora"], [lora_scaling])
-config = "lora"
+# lora_scaling = 128 / 128
+# pipe.load_lora_weights("results/motion_vector_step_500_r_128-lr_1e-5_car_5b/checkpoint-500/pytorch_lora_weights.safetensors", adapter_name="cogvideox-lora")
+# pipe.set_adapters(["cogvideox-lora"], [lora_scaling])
+# config = "lora"
 
 video = pipe(
     prompt=prompt,
