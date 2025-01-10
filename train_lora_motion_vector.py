@@ -1375,10 +1375,10 @@ def main(args):
 
                 target = torch.abs(model_input[:, 1:] - model_input[:, :-1])
                 model_pred = torch.abs(model_pred[:, 1:] - model_pred[:, :-1])
-                loss= (1 - F.cosine_similarity(model_pred, target, dim=2).mean())
-
-                # loss = torch.mean((weights * (model_pred - target) ** 2).reshape(batch_size, -1), dim=1)
-                # loss = loss.mean()
+                loss = (1 - F.cosine_similarity(model_pred, target, dim=2).mean())
+    
+                loss = torch.mean((weights * (model_pred - target) ** 2).reshape(batch_size, -1), dim=1)
+                loss = loss.mean()
                 accelerator.backward(loss)
 
                 if accelerator.sync_gradients:

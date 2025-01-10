@@ -6,11 +6,11 @@ from diffusers.utils import export_to_video
 
 from src.motion_embedding import inject_and_load_motion_embedding
 
-prompt = "A horse is walking in the desert."
-seed = 42
+prompt = "A tank is driving in the desert."
+seed = 0
 device = "cuda:3"
-ckpt_path = "results/origin/checkpoint-500/motion_embedding.pth"
-config = ckpt_path.split("/")[1]
+# ckpt_path = "results/origin/checkpoint-500/motion_embedding.pth"
+# config = ckpt_path.split("/")[1]
 
 pipe = CogVideoXPipeline.from_pretrained(
     "THUDM/CogVideoX-5b",
@@ -28,7 +28,7 @@ pipe.to(device)
 pipe.vae.enable_tiling()
 
 lora_scaling = 128 / 128
-pipe.load_lora_weights("results/motion_vector_step_500_r_128-lr_1e-5_car_5b/checkpoint-200/pytorch_lora_weights.safetensors", adapter_name="cogvideox-lora")
+pipe.load_lora_weights("results/motion_vector_step_500_r_128-lr_1e-5_car_5b/checkpoint-500/pytorch_lora_weights.safetensors", adapter_name="cogvideox-lora")
 pipe.set_adapters(["cogvideox-lora"], [lora_scaling])
 config = "lora"
 

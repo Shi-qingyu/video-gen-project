@@ -2,14 +2,14 @@
 
 export MODEL_PATH="THUDM/CogVideoX-5b"
 export DATASET_PATH="./data/horsejump"
-export OUTPUT_PATH="results/horsejump_lr_1e-3_st_1e-3_300"
+export OUTPUT_PATH="results/step_500_r_128_lr_1e-3_v3_horsejump"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 
 #  --use_8bit_adam is necessary for CogVideoX-5B-I2V
 # if you are not using wth 8 gus, change `accelerate_config_machine_single.yaml` num_processes as your gpu number
 accelerate launch --config_file configs/accelerate_config_machine_single.yaml --multi_gpu \
-  train.py \
+  train_motion_embedding.py \
   --gradient_checkpointing \
   --use_8bit_adam  \
   --pretrained_model_name_or_path $MODEL_PATH \
@@ -30,10 +30,10 @@ accelerate launch --config_file configs/accelerate_config_machine_single.yaml --
   --train_batch_size 1 \
   --max_train_steps 500 \
   --checkpointing_steps 100 \
-  --resume_from_checkpoint "results/horsejump_lr_1e-3_spatial/checkpoint-300/motion_embedding.pth" \
+  --resume_from_checkpoint "" \
   --gradient_accumulation_steps 1 \
   --learning_rate 1e-3 \
   --optimizer AdamW \
   --adam_beta1 0.9 \
   --adam_beta2 0.95 \
-  --version "spatialtemporal"
+  --version "v3"

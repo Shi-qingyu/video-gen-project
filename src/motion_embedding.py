@@ -48,7 +48,6 @@ class SpatialTemporalEmbedding(nn.Module):
         batch, seq_len, dim = hidden_states.shape
 
         motion_emb = self.motion_emb.reshape(self.frames, 1, 1, self.dim).repeat(1, self.height, self.width, 1)
-        motion_emb = motion_emb - motion_emb.mean(0)
         appearance_emb = self.appearance_emb.reshape(1, self.height, self.width, self.dim).repeat(self.frames, 1, 1, 1)
         emb = motion_emb + appearance_emb
  
@@ -116,13 +115,8 @@ class MotionEmbeddingV3(nn.Module):
         batch, seq_len, dim = hidden_states.shape
 
         motion_emb = self.motion_emb.reshape(self.frames, 1, 1, self.dim).repeat(1, self.height, self.width, 1)
-        motion_emb = motion_emb - motion_emb.mean(0)
-
-        if train:
-            appearance_emb = self.appearance_emb.reshape(1, self.height, self.width, self.dim).repeat(self.frames, 1, 1, 1)
-            emb = motion_emb + appearance_emb
-        else:
-            emb = motion_emb
+        appearance_emb = self.appearance_emb.reshape(1, self.height, self.width, self.dim).repeat(self.frames, 1, 1, 1)
+        emb = motion_emb + appearance_emb
         emb = emb.flatten(0, 2)
 
         if seq_len <= emb.shape[0]:
