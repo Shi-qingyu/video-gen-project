@@ -6,11 +6,11 @@ from diffusers.utils import export_to_video
 
 from src.motion_embedding import inject_and_load_motion_embedding
 
-prompt = "A man riding a horse is jumping over a fence."
+prompt = "A woman riding a bear is jumping over a fence."
 seed = 42
-device = "cuda:2"
-ckpt_path = "results/lr_1e-3_spatial_horse_jump/checkpoint-100/motion_embedding.pth"
-config = ckpt_path.split("/")[1]
+device = "cuda:1"
+ckpt_path = "results/lr_1e-3_spatialtemporal_resume_step_100_lr_1e-3_horse_jump/checkpoint-300/motion_embedding.pth"
+config = "_".join(ckpt_path.split("/")[1: 3])
 
 pipe = CogVideoXPipeline.from_pretrained(
     "THUDM/CogVideoX-5b",
@@ -20,7 +20,7 @@ pipe = CogVideoXPipeline.from_pretrained(
 inject_and_load_motion_embedding(
     pipe.transformer,
     ckpt_path=ckpt_path, 
-    version="spatial",
+    version="spatialtemporal",
     train=True
 )
 

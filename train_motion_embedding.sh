@@ -2,7 +2,7 @@
 
 export MODEL_PATH="THUDM/CogVideoX-5b"
 export DATASET_PATH="./data/horsejump"
-export OUTPUT_PATH="results/lr_1e-3_spatialtemporal_resume_step_100_lr_1e-3_horse_jump"
+export OUTPUT_PATH="results/lr_1e-3_v1_horse_jump"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 
@@ -30,10 +30,10 @@ accelerate launch --config_file configs/accelerate_config_machine_single.yaml --
   --train_batch_size 1 \
   --max_train_steps 500 \
   --checkpointing_steps 100 \
-  --resume_from_checkpoint "results/lr_1e-3_spatial_horse_jump/checkpoint-100/motion_embedding.pth" \
+  --resume_from_checkpoint "" \
   --gradient_accumulation_steps 1 \
   --learning_rate 1e-3 \
   --optimizer AdamW \
   --adam_beta1 0.9 \
   --adam_beta2 0.95 \
-  --version "spatialtemporal"
+  --version "v1"
