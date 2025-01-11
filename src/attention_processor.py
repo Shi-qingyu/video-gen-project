@@ -93,8 +93,6 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
         attention_mask: torch.Tensor = None,
         image_rotary_emb: torch.Tensor = None,
         word_ids: list = None,
-        word_lens: list = None,
-        bboxes: torch.Tensor = None,
         height: int = None,
         width: int = None,
         num_frames: int = None,
