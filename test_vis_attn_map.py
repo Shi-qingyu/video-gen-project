@@ -8,16 +8,17 @@ import torch.nn.functional as F
 from torchvision.io import write_png
 from diffusers.utils import export_to_video
 
-prompt = "A dog is playing on the grassland, realistic style."
-words = ["dog"]
-bboxes = [[0.2, 0.3, 0.4, 0.7]]
-device = "cuda:1"
-num_inference_steps = 50
+prompt = "A cat is playing on the grassland, realistic style."
+words = ["cat"]
+frame_idx_as_query = 1  # from 1 to 42
+pos = [15, 15]
+save_text_attention = False
+device = "cuda:0"
 
-
+NUM_INFERENCE_STEPS = 50
 ROOT = "attention_map"
 
-def save_attention_map(attention_maps, save_dir):
+def save_text_attention_map(attention_maps, save_dir):
     attention_maps = list(attention_maps.values())  # attention maps from all the layers
     attention_maps = torch.stack(attention_maps, dim=0)
     attention_maps = attention_maps.sum(0) / attention_maps.shape[0]
@@ -33,7 +34,7 @@ def save_attention_map(attention_maps, save_dir):
             write_png(_attention_map, save_path)
 
 
-def save_single_layer_attn_map(layer_idx, pos):
+def save_single_layer_attn_map(layer_idx: int, pos):
     attention_map_dir = os.path.join(save_root, f"layer_{layer_idx}_attn_maps")
     os.makedirs(attention_map_dir, exist_ok=True)
     single_frame_attn_map = attention_store.attention_store[str(layer_idx)]
@@ -41,9 +42,9 @@ def save_single_layer_attn_map(layer_idx, pos):
     attn_maps = (attn_maps - attn_maps.min()) / (attn_maps.max() - attn_maps.min())
     attn_maps = attn_maps * 255
     attn_maps = F.interpolate(attn_maps, size=(480, 720), mode="bilinear")
-    for i in range(len(attn_maps)):
-        attn_map = attn_maps[i].to(torch.uint8)
-        save_path = os.path.join(attention_map_dir, f"{pos[0]}_{pos[1]}_{i}.png")
+    for frame_idx in range(len(attn_maps)):
+        attn_map = attn_maps[frame_idx].to(torch.uint8)
+        save_path = os.path.join(attention_map_dir, f"{pos[0]}_{pos[1]}_{frame_idx}.png")
         write_png(attn_map, save_path)
         
 
@@ -53,7 +54,7 @@ transformer = MyCogVideoXTransformer3DModel.from_pretrained(
     torch_dtype=torch.bfloat16
 )
 
-attention_store = AttentionStore(num_inference_steps, transformer.config.num_layers)
+attention_store = AttentionStore(NUM_INFERENCE_STEPS, transformer.config.num_layers)
 
 for attn_processor in transformer.attn_processors.values():
     attn_processor.attention_store = attention_store
@@ -70,9 +71,10 @@ pipe.to(device)
 video = pipe(
     prompt=prompt,
     words=words,
-    bboxes=bboxes,
+    frame_idx_as_query=frame_idx_as_query,
+    save_text_attention=save_text_attention,
     num_videos_per_prompt=1,
-    num_inference_steps=50,
+    num_inference_steps=NUM_INFERENCE_STEPS,
     num_frames=49,
     guidance_scale=6,
     generator=torch.Generator(device=device).manual_seed(42),
@@ -85,9 +87,13 @@ os.makedirs(save_root, exist_ok=True)
 video_path = os.path.join(save_root, "video.mp4")
 export_to_video(video, video_path, fps=8)
 
-attention_map_dir = os.path.join(save_root, "attn_maps")
-os.makedirs(attention_map_dir, exist_ok=True)
-save_attention_map(attention_store.attention_store, attention_map_dir)
+if save_text_attention:
+    attention_map_dir = os.path.join(save_root, "text_attn_maps")
+    os.makedirs(attention_map_dir, exist_ok=True)
+    save_text_attention_map(attention_store.attention_store, attention_map_dir)
+else:
+    for i in range(42):
+        save_single_layer_attn_map(layer_idx=i, pos=pos)
 
 # attention_map_dir = attention_map_dir.replace("attn_maps", "single_attn_maps")
 # os.makedirs(attention_map_dir, exist_ok=True)

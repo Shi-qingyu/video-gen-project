@@ -22,7 +22,8 @@ class MyCogVideoXPipeline(CogVideoXPipeline):
         prompt: Optional[Union[str, List[str]]] = None,
         negative_prompt: Optional[Union[str, List[str]]] = None,
         words: List[str] = None,
-        bboxes: List[List[int]] = None,
+        frame_idx_as_query: int = 0,
+        save_text_attention: bool = False,
         height: int = 480,
         width: int = 720,
         num_frames: int = 49,
@@ -75,16 +76,14 @@ class MyCogVideoXPipeline(CogVideoXPipeline):
         latent_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
 
         word_ids = torch.tensor(word_ids, device=self._execution_device)
-        word_lens = torch.tensor(word_lens, device=self._execution_device)
-        bboxes = torch.tensor(bboxes, device=self._execution_device)
 
         attention_kwargs = {
             "word_ids": word_ids,
-            "word_lens": word_lens,
-            "bboxes": bboxes,
             "height": latent_height,
             "width": latent_width,
             "num_frames": latent_frames,
+            "frame_idx_as_query": frame_idx_as_query,
+            "save_text_attention": save_text_attention,
         }
 
         # 2. Default call parameters

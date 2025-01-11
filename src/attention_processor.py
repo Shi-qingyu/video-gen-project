@@ -69,7 +69,6 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
         height,
         width,
         store_text_cross_attention,
-        save_layer_idx,
     ):
         if store_text_cross_attention:
             attention_map = attention_map.reshape(
@@ -92,6 +91,8 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
         encoder_hidden_states: torch.Tensor,
         attention_mask: torch.Tensor = None,
         image_rotary_emb: torch.Tensor = None,
+        save_text_attention: Optional[bool] = False,
+        frame_idx_as_query: Optional[int] = None,
         word_ids: list = None,
         height: int = None,
         width: int = None,
@@ -140,9 +141,6 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
 
         attention_map = []
         start_idx = 0
-        save_text_cross_attention = False
-        save_layer_idx = 40
-        save_query_frame_idx = 1
 
         for i, idx in enumerate(block_ids):
             end_idx = idx
@@ -152,10 +150,10 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
             attention_probs = self.get_attention_scores(attn, query_partial, key) # (b * h, q_len, k_len)
             
             if i != 0:
-                if save_text_cross_attention:
+                if save_text_attention:
                     attention_map.append(attention_probs[attn.heads:, :, torch.tensor(word_ids, device=query.device, dtype=torch.int32)].mean(0))
                 else:
-                    if i == save_query_frame_idx:
+                    if i == frame_idx_as_query:
                         attention_map.append(attention_probs[attn.heads:, :, text_seq_length:].mean(0)) # (1350, 17550)
 
             hidden_states_partial = torch.bmm(attention_probs, value)
@@ -171,8 +169,7 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
             num_frames=num_frames, 
             height=height, 
             width=width, 
-            store_text_cross_attention=save_text_cross_attention,
-            save_layer_idx=save_layer_idx,
+            store_text_cross_attention=save_text_attention,
         )
 
         # linear proj
