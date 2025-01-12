@@ -96,6 +96,7 @@ def make_static_video(video_path):
 
 
 if __name__ == "__main__":
-    make_grid_for_frames("attention_map/A_cat_is_playing_on_the_grassland,_realistic_style/layer_0_attn_maps", nframe=13, nrow=1)
+    # for i in range(42):
+    #     make_grid_for_frames(f"attention_map/A_horse_is_running_on_the_ground,_high_quality,_realistic_style/layer_{i}_attn_maps", nframe=13, nrow=1)
 
-    # video_to_grid("outputs/A_woman_riding_a_lion_is_jumping_over_a_fence/lr_1e-3_spatial_frozen_temporal_lr_1e-3_step_100_horse_jump_checkpoint-400_42_w_app.mp4", nframe=4, nrow=4)
+    video_to_grid("outputs/The_woman_riding_a_lion_is_jumping_over_a_fence/lr_1e-3_spatial_temporal_horse_jump_checkpoint-300_42.mp4", nframe=4, nrow=4)

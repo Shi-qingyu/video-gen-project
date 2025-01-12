@@ -8,12 +8,14 @@ import torch.nn.functional as F
 from torchvision.io import write_png
 from diffusers.utils import export_to_video
 
-prompt = "A cat is playing on the grassland, realistic style."
-words = ["cat"]
-frame_idx_as_query = 1  # from 1 to 42
-pos = [15, 15]
+prompt = "A man riding a horse is jumping over a fence."
+negative_prompt = ""
+words = ["man"]
+frame_idx_as_query = 13  # from 1 to 13
+pos = [15, 23]
+seed = 42
 save_text_attention = False
-device = "cuda:0"
+device = "cuda:1"
 
 NUM_INFERENCE_STEPS = 50
 ROOT = "attention_map"
@@ -70,6 +72,7 @@ pipe.to(device)
 
 video = pipe(
     prompt=prompt,
+    negative_prompt=negative_prompt,
     words=words,
     frame_idx_as_query=frame_idx_as_query,
     save_text_attention=save_text_attention,
@@ -77,7 +80,7 @@ video = pipe(
     num_inference_steps=NUM_INFERENCE_STEPS,
     num_frames=49,
     guidance_scale=6,
-    generator=torch.Generator(device=device).manual_seed(42),
+    generator=torch.Generator(device=device).manual_seed(seed),
 ).frames[0]
 
 save_name = prompt.replace(" ", "_").replace(".", "")
