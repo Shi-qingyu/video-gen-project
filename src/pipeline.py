@@ -223,7 +223,7 @@ class MyCogVideoXPipeline(CogVideoXPipeline):
         return CogVideoXPipelineOutput(frames=video)
     
     
-class MyStepWiseCogVideoXPipeline(CogVideoXPipeline):
+class IntermediateCogVideoXPipeline(CogVideoXPipeline):
     @torch.no_grad()
     def __call__(
         self,
@@ -337,6 +337,7 @@ class MyStepWiseCogVideoXPipeline(CogVideoXPipeline):
 
         loss_tracker = []
         eps_prev = None
+        intermediate = None
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             # for DPM-solver++
             old_pred_original_sample = None
@@ -351,14 +352,21 @@ class MyStepWiseCogVideoXPipeline(CogVideoXPipeline):
                 timestep = t.expand(latent_model_input.shape[0])
 
                 # predict noise model_output
-                noise_pred = self.transformer(
+                output = self.transformer(
                     hidden_states=latent_model_input,
                     encoder_hidden_states=prompt_embeds,
                     timestep=timestep,
                     image_rotary_emb=image_rotary_emb,
                     attention_kwargs=attention_kwargs,
-                    return_dict=False,
-                )[0]
+                    return_dict=True,
+                )
+                noise_pred = output.sample
+
+                if intermediate is None:
+                    intermediate = output.intermediate
+                else:
+                    intermediate += output.intermediate
+
                 noise_pred = noise_pred.float()
 
                 alpha_prod_t = self.scheduler.alphas_cumprod[t]
@@ -396,11 +404,6 @@ class MyStepWiseCogVideoXPipeline(CogVideoXPipeline):
                     )
                 latents = latents.to(prompt_embeds.dtype)
                 
-                # video = self.decode_latents(latents)
-                # video = self.video_processor.postprocess_video(video=video, output_type=output_type)[0]
-                # output_video_path = f"outputs/videos/{i}.mp4"
-                # export_to_video(video, output_video_path, fps=8)
-                
                 # call the callback, if provided
                 if callback_on_step_end is not None:
                     callback_kwargs = {}
@@ -415,7 +418,15 @@ class MyStepWiseCogVideoXPipeline(CogVideoXPipeline):
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
 
-        return list(reversed(loss_tracker))
+        if not output_type == "latent":
+            video = self.decode_latents(latents)
+            video = self.video_processor.postprocess_video(video=video, output_type=output_type)
+        else:
+            video = latents
+        
+        intermediate = intermediate / num_inference_steps
+
+        return video, intermediate
 
 
 class MyInversionCogVideoXPipeline(CogVideoXPipeline):

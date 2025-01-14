@@ -1,9 +1,14 @@
 import os
 from pathlib import Path
 import numpy as np
+import imageio
+
+import torch
+import torch.nn.functional as F
 from torchvision.io import read_image, write_png
 from torchvision.utils import make_grid
 
+from sklearn.decomposition import PCA
 from diffusers.utils import export_to_video
 
 
@@ -47,7 +52,7 @@ def make_grid_for_frames(frame_dir: str, nframe=4, nrow=13):
     #     image = make_grid(bank, nrow=nrow)
     #     write_png(image, f"test{object_id}.png")
     
-    images = [image for image in frame_dir.iterdir()]
+    images = [image for image in frame_dir.iterdir() if image.is_file()]
     func = lambda x: int(x.stem)
     images = sorted(images, key=func)
     ids = np.linspace(0, len(images)-1, num=nframe).astype(np.int32)
@@ -95,8 +100,62 @@ def make_static_video(video_path):
     export_to_video(frames, tgt_path)
 
 
-if __name__ == "__main__":
-    # for i in range(42):
-    #     make_grid_for_frames(f"attention_map/A_horse_is_running_on_the_ground,_high_quality,_realistic_style/layer_{i}_attn_maps", nframe=13, nrow=1)
+def save_tensor_as_images(intermediate: torch.Tensor, root: str, target_size=(480, 720)):
+    """
+    Apply PCA on the channel dimension of `intermediate` (which has shape (f, h, w, c)),
+    reduce to 3 channels, then save as an MP4 file using imageio (v2.x).
+    
+    Args:
+        intermediate (torch.Tensor): Input tensor of shape (f, h, w, c).
+        output_path (str): Path to the output MP4 file.
+        fps (int): Frames per second for the output video.
+    """
+    
+    # 1. If needed, permute from (f, c, h, w) to (f, h, w, c).
+    #    For example:
+    #    intermediate = intermediate[-1].permute(0, 2, 3, 1)
+    f, h, w, c = intermediate.shape
 
-    video_to_grid("outputs/The_woman_riding_a_lion_is_jumping_over_a_fence/lr_1e-3_spatial_temporal_horse_jump_checkpoint-300_42.mp4", nframe=4, nrow=4)
+    # 2. Flatten (f, h, w) into one dimension, so PCA is over 'c'.
+    #    Shape -> (f*h*w, c).
+    flat_features = intermediate.reshape(-1, c).cpu().numpy()
+
+    # 3. Perform PCA to reduce from c to 3.
+    pca = PCA(n_components=3)
+    pca_result = pca.fit_transform(flat_features)  # shape: (f*h*w, 3)
+
+    # 4. Reshape back to (f, h, w, 3).
+    pca_result_reshaped = pca_result.reshape(f, h, w, 3)
+
+    # 5. Normalize values to [0, 255].
+    min_val = pca_result_reshaped.min()
+    max_val = pca_result_reshaped.max()
+    pca_result_reshaped = (pca_result_reshaped - min_val) / (max_val - min_val + 1e-8)
+    pca_result_reshaped *= 255.0
+
+    # Convert to uint8.
+    frames = pca_result_reshaped.astype(np.uint8)
+
+    # 6. Interpolate frames to the target size using PyTorch:
+    #    - Convert to torch.Tensor
+    #    - Permute to (f, 3, h, w)
+    #    - Resize via F.interpolate
+    frames_torch = torch.from_numpy(frames).permute(0, 3, 1, 2).float() / 255.0
+    # Interpolate to target_size
+    frames_resized_torch = F.interpolate(
+        frames_torch, 
+        size=target_size, 
+        mode='bilinear', 
+        align_corners=False
+    )
+
+    # Scale back to [0, 255]
+    frames_resized_torch = (frames_resized_torch * 255.0).byte()
+
+    for i, frame in enumerate(frames_resized_torch):
+        save_path = os.path.join(root, f"{i}.png")
+        write_png(frame, save_path)
+
+
+if __name__ == "__main__":
+    make_grid_for_frames("test", nframe=13, nrow=13)
