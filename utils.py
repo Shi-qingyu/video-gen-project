@@ -12,6 +12,9 @@ from sklearn.decomposition import PCA
 from diffusers.utils import export_to_video
 
 
+DATA_ROOT = "./data"
+
+
 def extract_frames_from_video(src_path, tgt_path, num_frames):
     import decord
     decord.bridge.set_bridge("torch")
@@ -158,4 +161,13 @@ def save_tensor_as_images(intermediate: torch.Tensor, root: str, target_size=(48
 
 
 if __name__ == "__main__":
-    make_grid_for_frames("test", nframe=13, nrow=13)
+    root = Path(DATA_ROOT)
+    for data in root.iterdir():
+        video_file = data.joinpath("videos.txt")
+        with open(video_file.as_posix(), "r") as file:
+            video_path = file.read().splitlines()[0]
+        print(video_path)
+        new_video_path = video_path[:-4] + "_static.mp4"
+        new_video_file = data.joinpath("videos_static.txt")
+        with open(new_video_file, "w") as file:
+            file.write(new_video_path)
