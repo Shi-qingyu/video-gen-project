@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 import numpy as np
 import imageio
+import json
 
 import torch
 import torch.nn.functional as F
@@ -162,12 +163,20 @@ def save_tensor_as_images(intermediate: torch.Tensor, root: str, target_size=(48
 
 if __name__ == "__main__":
     root = Path(DATA_ROOT)
+    with open("evaluation_prompts.json", "r") as file:
+        prompt2prompt = json.load(file)    
+
     for data in root.iterdir():
-        video_file = data.joinpath("videos.txt")
-        with open(video_file.as_posix(), "r") as file:
-            video_path = file.read().splitlines()[0]
-        print(video_path)
-        new_video_path = video_path[:-4] + "_static.mp4"
-        new_video_file = data.joinpath("videos_static.txt")
-        with open(new_video_file, "w") as file:
-            file.write(new_video_path)
+        prompt_file = data.joinpath("prompts.txt")
+        eval_prompt_file = data.joinpath("eval_prompts.txt")
+
+        with open(prompt_file.as_posix(), "r") as file:
+            prompt = file.read().splitlines()[0]
+        prompts = prompt2prompt[prompt]
+        if not eval_prompt_file.is_file():
+            with open(eval_prompt_file.as_posix(), "w") as file:
+                for prompt in prompts:
+                    if prompt == prompts[-1]:
+                        file.write(prompt)
+                    else:
+                        file.write(prompt + "\n")
