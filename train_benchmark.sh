@@ -28,7 +28,7 @@ for DATASET_SUBDIR in "$BASE_DATA_DIR"/*/; do
         DATASET_PATH="$BASE_DATA_DIR/$DATASET_NAME"
 
         # Define the OUTPUT_PATH based on the dataset name
-        OUTPUT_PATH="$BASE_OUTPUT_DIR/lr_1e-3_spatial_temporal_$DATASET_NAME"
+        OUTPUT_PATH="$BASE_OUTPUT_DIR/lr_1e-3_spatial_frozen_temporal_lr_1e-3_step_200_$DATASET_NAME"
 
         # Export the environment variables for the current iteration
         export DATASET_PATH
@@ -42,7 +42,7 @@ for DATASET_SUBDIR in "$BASE_DATA_DIR"/*/; do
         mkdir -p "$OUTPUT_PATH"
 
         # Execute the training command
-        accelerate launch --config_file configs/accelerate_config_machine_single.yaml --main_process_port 8002 --multi_gpu \
+        accelerate launch --config_file configs/accelerate_config_machine_single.yaml --main_process_port 8000 --multi_gpu \
           train_motion_embedding.py \
           --gradient_checkpointing \
           --use_8bit_adam  \
@@ -64,13 +64,13 @@ for DATASET_SUBDIR in "$BASE_DATA_DIR"/*/; do
           --train_batch_size 1 \
           --max_train_steps 500 \
           --checkpointing_steps 100 \
-          --resume_from_checkpoint "" \
+          --resume_from_checkpoint "$BASE_OUTPUT_DIR/lr_1e-3_spatial_$DATASET_NAME/checkpoint-200/motion_embedding.pth" \
           --gradient_accumulation_steps 1 \
           --learning_rate 1e-3 \
           --optimizer AdamW \
           --adam_beta1 0.9 \
           --adam_beta2 0.95 \
-          --version "spatial_temporal"
+          --version "spatial_frozen_temporal"
 
         echo "Training completed for dataset: $DATASET_NAME"
         echo "Output saved to: $OUTPUT_PATH"
