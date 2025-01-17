@@ -161,6 +161,17 @@ def save_tensor_as_images(intermediate: torch.Tensor, root: str, target_size=(48
         write_png(frame, save_path)
 
 
+def delete_bin_files(directory):
+    # Loop through all files and subdirectories
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            # Check if the file ends with '.bin'
+            if file.endswith('.bin'):
+                file_path = os.path.join(root, file)
+                os.remove(file_path)  # Delete the file
+                print(f"Deleted: {file_path}")
+
+
 if __name__ == "__main__":
     root = Path(DATA_ROOT)
     with open("evaluation_prompts.json", "r") as file:
