@@ -6,10 +6,10 @@ from diffusers.utils import export_to_video
 
 from src.motion_embedding import inject_and_load_motion_embedding
 
-prompt = "A robot is dancing hip-hop on the floor."
+prompt = "A goat is weaving through the obstacles in an S-shaped pattern."
 seed = 42
 device = "cuda:0"
-ckpt_path = "checkpoints/lr_1e-3_spatial_temporal_w_tl_0.01_breakdance-flare/checkpoint-500/motion_embedding.pth"
+ckpt_path = "checkpoints/lr_1e-3_spatial_temporal_w_tl_0.1_dog-agility/checkpoint-500/motion_embedding.pth"
 config = "_".join(ckpt_path.split("/")[1: 3])
 
 pipe = CogVideoXPipeline.from_pretrained(
@@ -26,11 +26,6 @@ inject_and_load_motion_embedding(
 
 pipe.to(device)
 pipe.vae.enable_tiling()
-
-# lora_scaling = 128 / 128
-# pipe.load_lora_weights("results/motion_vector_step_500_r_128-lr_1e-5_car_5b/checkpoint-500/pytorch_lora_weights.safetensors", adapter_name="cogvideox-lora")
-# pipe.set_adapters(["cogvideox-lora"], [lora_scaling])
-# config = "lora"
 
 video = pipe(
     prompt=prompt,
