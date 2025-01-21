@@ -147,6 +147,8 @@ def inject_motion_embedding(transformer: CogVideoXTransformer3DModel, train=True
                 motion_embedding = SpatialTemporalEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
             elif version == "spatial_temporal":
                 motion_embedding = SpatialTemporalEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
+            else:
+                raise ValueError(f"Unexpected motion embedding version: {version}")
 
             module.add_module("motion_embedding", motion_embedding)
 

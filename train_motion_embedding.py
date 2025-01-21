@@ -193,7 +193,7 @@ def get_args():
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="cogvideox-lora",
+        default="outputs",
         help="The output directory where the model predictions and checkpoints will be written.",
     )
     parser.add_argument(
@@ -318,6 +318,18 @@ def get_args():
         default=False,
         help="Whether or not to use VAE tiling for saving memory.",
     )
+    parser.add_argument(
+        "--tracking_loss",
+        action="store_true",
+        default=False,
+        help="Whether or not to use tracking loss."
+    )
+    parser.add_argument(
+        "--tracking_loss_weight",
+        type=float,
+        default=1e-2,
+        help="Tracking loss weights."
+    )
 
     # Optimizer
     parser.add_argument(
@@ -396,7 +408,7 @@ def get_args():
     parser.add_argument(
         "--version",
         type=str,
-        default="v1",
+        default="spatial_temporal",
         help=(
             'MotionEmbedding\'s version.'
         ),
@@ -458,6 +470,7 @@ class VideoDataset(Dataset):
         return {
             "instance_prompt": self.id_token + self.instance_prompts[index],
             "instance_video": self.instance_videos[index],
+            "instance_track": self.tracking_points[index],
         }
 
     def _load_dataset_from_hub(self):
@@ -545,6 +558,7 @@ class VideoDataset(Dataset):
         decord.bridge.set_bridge("torch")
 
         videos = []
+        self.tracking_points = []
         train_transforms = transforms.Compose(
             [
                 transforms.Lambda(lambda x: x / 255.0 * 2.0 - 1.0),
@@ -555,24 +569,32 @@ class VideoDataset(Dataset):
             video_reader = decord.VideoReader(uri=filename.as_posix(), width=self.width, height=self.height)
             video_num_frames = len(video_reader)
 
+            tracking = self.instance_data_root.joinpath("tracks.pth")
+            tracking = torch.load(tracking.as_posix())    # (F, N, 2)
+
             start_frame = min(self.skip_frames_start, video_num_frames)
             end_frame = max(0, video_num_frames - self.skip_frames_end)
             if end_frame <= start_frame:
                 frames = video_reader.get_batch([start_frame])
+                tracking = tracking[[start_frame]]
             elif end_frame - start_frame <= self.max_num_frames:
                 frames = video_reader.get_batch(list(range(start_frame, end_frame)))
+                tracking = tracking[list(range(start_frame, end_frame))]
             else:
                 indices = list(range(start_frame, end_frame, (end_frame - start_frame) // self.max_num_frames))
                 frames = video_reader.get_batch(indices)
+                tracking = tracking[indices]
 
             # Ensure that we don't go over the limit
             frames = frames[: self.max_num_frames]
+            tracking = tracking[: self.max_num_frames]
             selected_num_frames = frames.shape[0]
 
             # Choose first (4k + 1) frames as this is how many is required by the VAE
             remainder = (3 + (selected_num_frames % 4)) % 4
             if remainder != 0:
                 frames = frames[:-remainder]
+                tracking = tracking[:-remainder]
             selected_num_frames = frames.shape[0]
 
             assert (selected_num_frames - 1) % 4 == 0
@@ -581,88 +603,9 @@ class VideoDataset(Dataset):
             frames = frames.float()
             frames = torch.stack([train_transforms(frame) for frame in frames], dim=0)
             videos.append(frames.permute(0, 3, 1, 2).contiguous())  # frames.shape: [F, C, H, W]
+            self.tracking_points.append(tracking)
 
         return videos
-
-
-def save_model_card(
-    repo_id: str,
-    videos=None,
-    base_model: str = None,
-    validation_prompt=None,
-    repo_folder=None,
-    fps=8,
-):
-    widget_dict = []
-    if videos is not None:
-        for i, video in enumerate(videos):
-            export_to_video(video, os.path.join(repo_folder, f"final_video_{i}.mp4", fps=fps))
-            widget_dict.append(
-                {"text": validation_prompt if validation_prompt else " ", "output": {"url": f"video_{i}.mp4"}}
-            )
-
-    model_description = f"""
-# CogVideoX LoRA - {repo_id}
-
-<Gallery />
-
-## Model description
-
-These are {repo_id} LoRA weights for {base_model}.
-
-The weights were trained using the [CogVideoX Diffusers trainer](https://github.com/huggingface/diffusers/blob/main/examples/cogvideo/train_cogvideox_lora.py).
-
-Was LoRA for the text encoder enabled? No.
-
-## Download model
-
-[Download the *.safetensors LoRA]({repo_id}/tree/main) in the Files & versions tab.
-
-## Use it with the [🧨 diffusers library](https://github.com/huggingface/diffusers)
-
-```py
-from diffusers import CogVideoXPipeline
-import torch
-
-pipe = CogVideoXPipeline.from_pretrained("THUDM/CogVideoX-5b", torch_dtype=torch.bfloat16).to("cuda")
-pipe.load_lora_weights("{repo_id}", weight_name="pytorch_lora_weights.safetensors", adapter_name=["cogvideox-lora"])
-
-# The LoRA adapter weights are determined by what was used for training.
-# In this case, we assume `--lora_alpha` is 32 and `--rank` is 64.
-# It can be made lower or higher from what was used in training to decrease or amplify the effect
-# of the LoRA upto a tolerance, beyond which one might notice no effect at all or overflows.
-pipe.set_adapters(["cogvideox-lora"], [32 / 64])
-
-video = pipe("{validation_prompt}", guidance_scale=6, use_dynamic_cfg=True).frames[0]
-```
-
-For more details, including weighting, merging and fusing LoRAs, check the [documentation on loading LoRAs in diffusers](https://huggingface.co/docs/diffusers/main/en/using-diffusers/loading_adapters)
-
-## License
-
-Please adhere to the licensing terms as described [here](https://huggingface.co/THUDM/CogVideoX-5b/blob/main/LICENSE) and [here](https://huggingface.co/THUDM/CogVideoX-2b/blob/main/LICENSE).
-"""
-    model_card = load_or_create_model_card(
-        repo_id_or_path=repo_id,
-        from_training=True,
-        license="other",
-        base_model=base_model,
-        prompt=validation_prompt,
-        model_description=model_description,
-        widget=widget_dict,
-    )
-    tags = [
-        "text-to-video",
-        "diffusers-training",
-        "diffusers",
-        "lora",
-        "cogvideox",
-        "cogvideox-diffusers",
-        "template:sd-lora",
-    ]
-
-    model_card = populate_model_card(model_card, tags=tags)
-    model_card.save(os.path.join(repo_folder, "README.md"))
 
 
 def log_validation(
@@ -1155,8 +1098,8 @@ def main(args):
     )
 
     def encode_video(video):
-        video = video.to(accelerator.device, dtype=vae.dtype).unsqueeze(0)  #[B, F, C, H, W]
-        video = video.permute(0, 2, 1, 3, 4)  # [B, C, F, H, W]
+        video = video.to(accelerator.device, dtype=vae.dtype).unsqueeze(0)  # [1, F, C, H, W]
+        video = video.permute(0, 2, 1, 3, 4)  # [1, C, F, H, W]
         latent_dist = vae.encode(video).latent_dist
         return latent_dist
 
@@ -1165,13 +1108,18 @@ def main(args):
     def collate_fn(examples):
         videos = [example["instance_video"].sample() * vae.config.scaling_factor for example in examples]
         prompts = [example["instance_prompt"] for example in examples]
+        tracks = [example["instance_track"] for example in examples]
 
         videos = torch.cat(videos)
         videos = videos.to(memory_format=torch.contiguous_format).float()
 
+        tracks = torch.stack(tracks)    # [B, T, N, 2]
+        tracks = tracks.to(memory_format=torch.contiguous_format).float()
+
         return {
             "videos": videos,
             "prompts": prompts,
+            "tracks": tracks,
         }
 
     train_dataloader = DataLoader(
@@ -1278,7 +1226,7 @@ def main(args):
 
                 # Sample noise that will be added to the latents
                 noise = torch.randn_like(model_input)
-                batch_size, num_frames, num_channels, height, width = model_input.shape # [B, 13, 16, 60, 90]
+                batch_size, num_frames, num_channels, height, width = model_input.shape # [B, F, C, H, W]
 
                 # Sample a random timestep for each image
                 timesteps = torch.randint(
@@ -1313,7 +1261,7 @@ def main(args):
                     image_rotary_emb=image_rotary_emb,
                     return_dict=False,
                 )[0]
-                model_pred = scheduler.get_velocity(model_output, noisy_model_input, timesteps)
+                model_pred = scheduler.get_velocity(model_output, noisy_model_input, timesteps) # [B, F, C, H, W]
 
                 alphas_cumprod = scheduler.alphas_cumprod[timesteps]
                 weights = 1 / (1 - alphas_cumprod)
@@ -1324,6 +1272,28 @@ def main(args):
 
                 loss = torch.mean((weights * (model_pred - target) ** 2).reshape(batch_size, -1), dim=1)
                 loss = loss.mean()
+
+                if args.tracking_loss:
+                    tracking_points = batch["tracks"].to(accelerator.device)    # [B, F, N, 2]
+                    frame_ids = torch.linspace(0, tracking_points.size(1) - 1, num_frames).to(torch.int32)
+                    tracking_points = tracking_points[:, frame_ids]
+                    batch_size, _, num_trajectories, _ = tracking_points.shape
+                    model_pred = model_pred.permute(0, 1, 3, 4, 2)  # [B, F, H, W, C]
+                    batch_ids = torch.arange(batch_size)[:, None, None].repeat(1, num_trajectories, num_frames).to(accelerator.device)
+                    frame_ids = torch.arange(num_frames)[None, None, :].repeat(batch_size, num_trajectories, 1).to(accelerator.device)
+                    h_coor = tracking_points[:, :, :, 1].transpose(1, 2).to(accelerator.device) * height
+                    w_coor = tracking_points[:, :, :, 0].transpose(1, 2).to(accelerator.device) * width
+                    h_coor = h_coor.to(torch.int32).clamp(0, height - 1)
+                    w_coor = w_coor.to(torch.int32).clamp(0, width - 1)
+
+                    # [B, N, F, C]
+                    trajectory_embeddings = model_pred[batch_ids, frame_ids, h_coor, w_coor]
+                    tracking_loss = torch.mean(
+                        ((trajectory_embeddings[:, :, 1:] - trajectory_embeddings[:, :, :-1]) ** 2).reshape(batch_size, -1), dim=1
+                    )
+                    tracking_loss = tracking_loss.mean()
+                    loss = loss + args.tracking_loss_weight * tracking_loss
+
                 accelerator.backward(loss)
 
                 if accelerator.sync_gradients:
@@ -1431,22 +1401,6 @@ def main(args):
                     is_final_validation=True,
                 )
                 validation_outputs.extend(video)
-
-        if args.push_to_hub:
-            save_model_card(
-                repo_id,
-                videos=validation_outputs,
-                base_model=args.pretrained_model_name_or_path,
-                validation_prompt=args.validation_prompt,
-                repo_folder=args.output_dir,
-                fps=args.fps,
-            )
-            upload_folder(
-                repo_id=repo_id,
-                folder_path=args.output_dir,
-                commit_message="End of training",
-                ignore_patterns=["step_*", "epoch_*"],
-            )
 
     accelerator.end_training()
 

@@ -173,21 +173,4 @@ def delete_bin_files(directory):
 
 
 if __name__ == "__main__":
-    root = Path(DATA_ROOT)
-    with open("evaluation_prompts.json", "r") as file:
-        prompt2prompt = json.load(file)    
-
-    for data in root.iterdir():
-        prompt_file = data.joinpath("prompts.txt")
-        eval_prompt_file = data.joinpath("eval_prompts.txt")
-
-        with open(prompt_file.as_posix(), "r") as file:
-            prompt = file.read().splitlines()[0]
-        prompts = prompt2prompt[prompt]
-        if not eval_prompt_file.is_file():
-            with open(eval_prompt_file.as_posix(), "w") as file:
-                for prompt in prompts:
-                    if prompt == prompts[-1]:
-                        file.write(prompt)
-                    else:
-                        file.write(prompt + "\n")
+    delete_bin_files("checkpoints")

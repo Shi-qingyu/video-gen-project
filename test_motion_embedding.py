@@ -6,10 +6,10 @@ from diffusers.utils import export_to_video
 
 from src.motion_embedding import inject_and_load_motion_embedding
 
-prompt = "A bear is walking on the stone."
+prompt = "A robot is dancing hip-hop on the floor."
 seed = 42
-device = "cuda:2"
-ckpt_path = "checkpoints/lr_1e-3_spatial_bear/checkpoint-200/motion_embedding.pth"
+device = "cuda:0"
+ckpt_path = "checkpoints/lr_1e-3_spatial_temporal_w_tl_0.01_breakdance-flare/checkpoint-500/motion_embedding.pth"
 config = "_".join(ckpt_path.split("/")[1: 3])
 
 pipe = CogVideoXPipeline.from_pretrained(
