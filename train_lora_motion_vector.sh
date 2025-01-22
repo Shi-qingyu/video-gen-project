@@ -18,8 +18,6 @@ accelerate launch --config_file configs/accelerate_config_machine_single.yaml --
   --instance_data_root $DATASET_PATH \
   --caption_column prompts.txt \
   --video_column videos.txt \
-  --validation_prompt "A sks cat is swimming in the pool" \
-  --validation_prompt_separator ::: \
   --num_validation_videos 1 \
   --validation_epochs 500 \
   --seed 0 \

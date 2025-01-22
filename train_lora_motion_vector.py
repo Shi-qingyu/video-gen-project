@@ -1522,22 +1522,6 @@ def main(args):
                 )
                 validation_outputs.extend(video)
 
-        if args.push_to_hub:
-            save_model_card(
-                repo_id,
-                videos=validation_outputs,
-                base_model=args.pretrained_model_name_or_path,
-                validation_prompt=args.validation_prompt,
-                repo_folder=args.output_dir,
-                fps=args.fps,
-            )
-            upload_folder(
-                repo_id=repo_id,
-                folder_path=args.output_dir,
-                commit_message="End of training",
-                ignore_patterns=["step_*", "epoch_*"],
-            )
-
     accelerator.end_training()
 
 
