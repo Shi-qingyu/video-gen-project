@@ -6,6 +6,8 @@ import json
 
 import torch
 import torch.nn.functional as F
+import torch.fft as fft
+from pytorch_wavelets import DWT1DForward, DWT1DInverse
 from torchvision.io import read_image, write_png
 from torchvision.utils import make_grid
 
@@ -171,6 +173,59 @@ def delete_bin_files(directory):
                 os.remove(file_path)  # Delete the file
                 print(f"Deleted: {file_path}")
 
+
+def w_low_freq_local(height, width, delta=0.05, base=1.):
+    rows = torch.arange(height, dtype=torch.float32)
+    cols = torch.arange(width, dtype=torch.float32)
+
+    rows, cols = torch.meshgrid(rows, cols)
+
+    coefficient_matrix = (rows - height / 2)**2 + (cols - width / 2)**2
+    w_low_freq = ((height/2) ** 2 + (width/2) ** 2) ** delta - coefficient_matrix ** delta + base
+
+    return w_low_freq
+
+
+def sma_local(images, v0hat, accelerator, delta=0.05, base=1.):
+    b,c,f,h,w = images.shape
+    img_residuals = torch.abs(images[:, :, 1:, :, :] - images[:, :, :-1, :, :])
+    fft_img_residuals = fft.fftn(img_residuals.float(), dim=(-2, -1))
+    fft_img_residuals = fft.fftshift(fft_img_residuals, dim=(-2, -1))
+    magnitude_img_residuals = torch.abs(fft_img_residuals)
+    phase_img_residuals = torch.angle(fft_img_residuals)
+
+    v0hat_residuals = torch.abs(v0hat[:, :, 1:, :, :] - v0hat[:, :, :-1, :, :])
+    fft_v0hat_residuals = fft.fftn(v0hat_residuals.float(), dim=(-2, -1))
+    fft_v0hat_residuals = fft.fftshift(fft_v0hat_residuals, dim=(-2, -1))
+    magnitude_v0hat_residuals = torch.abs(fft_v0hat_residuals)
+    phase_v0hat_residuals = torch.angle(fft_v0hat_residuals)
+
+    w_low_freq = w_low_freq_local(h, w, delta=delta, base=base).to(accelerator.device).reshape(1,1,1,h,w)
+
+    loss_sma_mag = torch.mean(torch.abs(magnitude_img_residuals.float() - magnitude_v0hat_residuals.float()) * w_low_freq)
+    loss_sma_phase = torch.mean(torch.abs(phase_img_residuals.float() - phase_v0hat_residuals.float()) * w_low_freq)
+    loss_sma_local = loss_sma_mag + loss_sma_phase
+    return loss_sma_local
+
+
+def sma_global(images, v0hat, wavelet_type='haar', num_levels=3, ld_levels=[1., 1., 1., 1.]):
+    b,c,f,h,w = images.shape
+    images = images.permute(0, 1, 3, 4, 2).reshape(b, c*h*w, f).float() 
+    v0hat = v0hat.permute(0, 1, 3, 4, 2).reshape(b, c*h*w, f).float() 
+
+    img_residuals = torch.abs(images[:, :, 1:] - images[:, :, :-1])
+    v0hat_residuals = torch.abs(v0hat[:, :, 1:] - v0hat[:, :, :-1])
+
+    dwt = DWT1DForward(wave=wavelet_type, J=num_levels).cuda()
+    images_l, images_h = dwt(img_residuals)
+    v0hat_l, v0hat_h = dwt(v0hat_residuals)
+
+    l1_loss = 0.0
+    l1_loss += torch.abs(images_l - v0hat_l).mean() * ld_levels[0]
+
+    for i, (c1, c2) in enumerate(zip(images_h, v0hat_h)):
+        l1_loss += torch.abs(c1 - c2).mean() * ld_levels[i + 1]
+    return l1_loss
 
 if __name__ == "__main__":
     delete_bin_files("checkpoints")
