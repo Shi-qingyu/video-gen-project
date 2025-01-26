@@ -7,7 +7,7 @@ import json
 import torch
 import torch.nn.functional as F
 import torch.fft as fft
-from pytorch_wavelets import DWT1DForward, DWT1DInverse
+# from pytorch_wavelets import DWT1DForward, DWT1DInverse
 from torchvision.io import read_image, write_png
 from torchvision.utils import make_grid
 
@@ -40,23 +40,26 @@ def extract_frames_from_video(src_path, tgt_path, num_frames):
     export_to_video(frames, tgt_path, fps=8)
 
 
-def make_grid_for_frames(frame_dir: str, nframe=4, nrow=13):
+def make_grid_for_frames(frame_dir: str, nframe=4, nrow=13, is_mask=False):
     if isinstance(frame_dir, str):
         frame_dir = Path(frame_dir)
 
     assert isinstance(frame_dir, Path), f"Expect Path Object but got {type(frame_dir)}"
-    # object_ids = set([image.stem.split("_")[0] for image in frame_dir.iterdir()])
-    # for object_id in object_ids:
-    #     images = [
-    #         image.as_posix() for image in frame_dir.iterdir() if image.name.startswith(object_id)
-    #     ]
-    #     bank = []
-    #     func = lambda x: int(x.split("_")[-1].split(".")[0])
-    #     iter = sorted(images, key=func)
-    #     for image in iter:
-    #         bank.append(read_image(image))
-    #     image = make_grid(bank, nrow=nrow)
-    #     write_png(image, f"test{object_id}.png")
+
+    if is_mask:
+        object_ids = set([image.stem.split("_")[0] for image in frame_dir.iterdir()])
+        for object_id in object_ids:
+            images = [
+                image.as_posix() for image in frame_dir.iterdir() if image.name.startswith(object_id)
+            ]
+            bank = []
+            func = lambda x: int(x.split("_")[-1].split(".")[0])
+            iter = sorted(images, key=func)
+            for image in iter:
+                bank.append(read_image(image))
+            image = make_grid(bank, nrow=nrow)
+            write_png(image, f"test{object_id}.png")
+        return None
     
     images = [image for image in frame_dir.iterdir() if image.is_file()]
     func = lambda x: int(x.stem)
@@ -68,6 +71,7 @@ def make_grid_for_frames(frame_dir: str, nframe=4, nrow=13):
     image = make_grid(bank, nrow=nrow)
     save_path = frame_dir.joinpath("grid.png")
     write_png(image, save_path.as_posix())
+    return None
 
 
 def video_to_frames(video_path):
@@ -116,7 +120,9 @@ def save_tensor_as_images(intermediate: torch.Tensor, root: str, target_size=(48
         output_path (str): Path to the output MP4 file.
         fps (int): Frames per second for the output video.
     """
-    
+    if not os.path.exists(root):
+        os.makedirs(root, exist_ok=True)
+
     # 1. If needed, permute from (f, c, h, w) to (f, h, w, c).
     #    For example:
     #    intermediate = intermediate[-1].permute(0, 2, 3, 1)
@@ -228,4 +234,11 @@ def sma_global(images, v0hat, wavelet_type='haar', num_levels=3, ld_levels=[1., 
     return l1_loss
 
 if __name__ == "__main__":
-    delete_bin_files("checkpoints")
+    # ckpt = torch.load("checkpoints/lr_1e-3_spatial_temporal_dog-agility/checkpoint-500/motion_embedding.pth")
+    # print(ckpt.keys())
+    # for i in range(42):
+    #     appearance_emb = ckpt[f"transformer_blocks.{str(i)}.motion_embedding.appearance_emb"]
+    #     appearance_emb = appearance_emb.to(torch.float32)
+    #     save_tensor_as_images(appearance_emb[None], root=f"vis_emb/{str(i)}")
+
+    video_to_grid("outputs/A_goat_is_weaving_through_the_obstacles_in_an_S-shaped_pattern/lr_1e-3_spatial_temporal_w_tl_0.1_bs_4_dog-agility_checkpoint-500_42.mp4", nframe=4, nrow=4)

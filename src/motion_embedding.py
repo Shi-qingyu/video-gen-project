@@ -94,6 +94,29 @@ class SpatialTemporalEmbedding(nn.Module):
         emb = emb.to(dtype=hidden_states.dtype, device=hidden_states.device)
 
         return hidden_states + emb[None]
+
+
+class ScaleShiftEmbedding(nn.Module):
+    def __init__(self, height, width, frames, dim) -> None:
+        super().__init__()
+        self.height = height
+        self.width = width
+        self.frames = frames
+        self.dim = dim
+
+        self.scale_emb = nn.Parameter(torch.zeros(size=(height, width, dim)))
+        self.shift_emb = nn.Parameter(torch.zeros(size=(frames, dim)))
+    
+    def forward(self, hidden_states: torch.Tensor, train=True):
+        batch, seq_len, dim = hidden_states.shape
+
+        shift_emb = self.shift_emb.reshape(self.frames, 1, 1, self.dim).repeat(1, self.height, self.width, 1)
+        shift_emb = shift_emb.flatten(0, 2)[None]
+        scale_emb = self.scale_emb.reshape(1, self.height, self.width, self.dim).repeat(self.frames, 1, 1, 1)
+        scale_emb = scale_emb.flatten(0, 2)[None]
+
+        hidden_states = hidden_states * (1 + scale_emb) + shift_emb
+        return hidden_states
     
 
 def inject_motion_embedding(transformer: CogVideoXTransformer3DModel, train=True, version=""):
@@ -147,6 +170,8 @@ def inject_motion_embedding(transformer: CogVideoXTransformer3DModel, train=True
                 motion_embedding = SpatialTemporalEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
             elif version == "spatial_temporal":
                 motion_embedding = SpatialTemporalEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
+            elif version == "scale_shift":
+                motion_embedding = ScaleShiftEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
             else:
                 raise ValueError(f"Unexpected motion embedding version: {version}")
 
@@ -212,15 +237,3 @@ if __name__ == "__main__":
     inject_and_load_motion_embedding(transformer, "test.pth")
 
     print("Finish!")
-
-    # pipe.vae.enable_tiling()
-    # prompt = "A panda, dressed in a small, red jacket and a tiny hat, sits on a wooden stool in a serene bamboo forest. The panda's fluffy paws strum a miniature acoustic guitar, producing soft, melodic tunes. Nearby, a few other pandas gather, watching curiously and some clapping in rhythm. Sunlight filters through the tall bamboo, casting a gentle glow on the scene. The panda's face is expressive, showing concentration and joy as it plays. The background includes a small, flowing stream and vibrant green foliage, enhancing the peaceful and magical atmosphere of this unique musical performance."
-    # video = pipe(
-    #     prompt=prompt,
-    #     num_videos_per_prompt=1,
-    #     num_inference_steps=50,
-    #     num_frames=49,
-    #     guidance_scale=6,
-    #     generator=torch.Generator(device="cuda").manual_seed(42),
-    # ).frames[0]
-    # export_to_video(video, "output.mp4", fps=8)
