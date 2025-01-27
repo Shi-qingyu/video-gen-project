@@ -122,7 +122,7 @@ class ScaleShiftEmbedding(nn.Module):
         return hidden_states
     
 
-def inject_motion_embedding(transformer: CogVideoXTransformer3DModel, train=True, version=""):
+def inject_motion_embedding(transformer: CogVideoXTransformer3DModel, train=True, version="", **kwargs):
     def CogVideoXBlock_forward(self, hidden_states, encoder_hidden_states, temb, image_rotary_emb):
         text_seq_length = encoder_hidden_states.size(1)
 
@@ -162,19 +162,24 @@ def inject_motion_embedding(transformer: CogVideoXTransformer3DModel, train=True
     dim = transformer.config.num_attention_heads * transformer.config.attention_head_dim
 
     trainable_parameters = []
-    for module in transformer.modules():
+    for name, module in transformer.named_modules():
         if module.__class__.__name__ == "CogVideoXBlock":
+            block_idx = int(name.split(".")[-1])
             module.forward = CogVideoXBlock_forward.__get__(module, CogVideoXBlock)
             if version == "spatial":
                 motion_embedding = SpatialEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
             elif version == "temporal":
                 motion_embedding = TemporalEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
-            elif version == "spatial_frozen_temporal":
-                motion_embedding = SpatialTemporalEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
-            elif version == "spatial_temporal":
+            elif version == "spatial_frozen_temporal" or version == "spatial_temporal":
                 motion_embedding = SpatialTemporalEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
             elif version == "scale_shift":
                 motion_embedding = ScaleShiftEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
+            elif version == "adaptive_spatial_temporal":
+                intermediate = kwargs.get("intermediate", 21)
+                if block_idx < intermediate:
+                    motion_embedding = TemporalEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
+                else:
+                    motion_embedding = SpatialTemporalEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
             else:
                 raise ValueError(f"Unexpected motion embedding version: {version}")
 

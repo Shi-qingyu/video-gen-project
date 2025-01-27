@@ -8,8 +8,8 @@ from src.motion_embedding import inject_and_load_motion_embedding
 
 prompt = "An astronaut is dancing hip-hop on the floor."
 seed = 42
-device = "cuda:3"
-ckpt_path = "checkpoints/lr_1e-3_spatial_temporal_breakdance-flare/checkpoint-500/motion_embedding.pth"
+device = "cuda:0"
+ckpt_path = "checkpoints/lr_1e-3_spatial_temporal_w_tl_0.1_hfl_0.1_breakdance-flare/checkpoint-500/motion_embedding.pth"
 config = "_".join(ckpt_path.split("/")[1: 3])
 
 pipe = CogVideoXPipeline.from_pretrained(
