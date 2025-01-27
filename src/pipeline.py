@@ -74,7 +74,6 @@ class MyCogVideoXPipeline(CogVideoXPipeline):
         latent_height = height // self.vae_scale_factor_spatial // self.transformer.patch_embed.patch_size
         latent_width = width // self.vae_scale_factor_spatial // self.transformer.patch_embed.patch_size
         latent_frames = (num_frames - 1) // self.vae_scale_factor_temporal + 1
-
         word_ids = torch.tensor(word_ids, device=self._execution_device)
 
         attention_kwargs = {

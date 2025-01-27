@@ -48,7 +48,7 @@ from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_
 from diffusers.utils.torch_utils import is_compiled_module
 
 from src.motion_embedding import inject_and_load_motion_embedding, inject_motion_embedding, save_motion_embedding
-
+from utils import sma_global
 
 if is_wandb_available():
     import wandb
@@ -317,6 +317,12 @@ def get_args():
         action="store_true",
         default=False,
         help="Whether or not to use VAE tiling for saving memory.",
+    )
+    parser.add_argument(
+        "--high_frequency_loss",
+        action="store_true",
+        default=False,
+        help="Whether or not to use high frequency loss."
     )
     parser.add_argument(
         "--tracking_loss",
@@ -1278,7 +1284,7 @@ def main(args):
                     frame_ids = torch.linspace(0, tracking_points.size(1) - 1, num_frames).to(torch.int32)
                     tracking_points = tracking_points[:, frame_ids]
                     batch_size, _, num_trajectories, _ = tracking_points.shape
-                    model_pred = model_pred.permute(0, 1, 3, 4, 2)  # [B, F, H, W, C]
+                    model_pred_ = model_pred.permute(0, 1, 3, 4, 2)  # [B, F, H, W, C]
                     batch_ids = torch.arange(batch_size)[:, None, None].repeat(1, num_trajectories, num_frames).to(accelerator.device)
                     frame_ids = torch.arange(num_frames)[None, None, :].repeat(batch_size, num_trajectories, 1).to(accelerator.device)
                     h_coor = tracking_points[:, :, :, 1].transpose(1, 2).to(accelerator.device) * height
@@ -1287,12 +1293,16 @@ def main(args):
                     w_coor = w_coor.to(torch.int32).clamp(0, width - 1)
 
                     # [B, N, F, C]
-                    trajectory_embeddings = model_pred[batch_ids, frame_ids, h_coor, w_coor]
+                    trajectory_embeddings = model_pred_[batch_ids, frame_ids, h_coor, w_coor]
                     tracking_loss = torch.mean(
                         ((trajectory_embeddings[:, :, 1:] - trajectory_embeddings[:, :, :-1]) ** 2).reshape(batch_size, -1), dim=1
                     )
                     tracking_loss = tracking_loss.mean()
                     loss = loss + args.tracking_loss_weight * tracking_loss
+
+                if args.high_frequency_loss:
+                    high_frequency_loss = sma_global(target, model_pred)
+                    loss = loss + high_frequency_loss
 
                 accelerator.backward(loss)
 

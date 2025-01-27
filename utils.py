@@ -7,11 +7,14 @@ import json
 import torch
 import torch.nn.functional as F
 import torch.fft as fft
-# from pytorch_wavelets import DWT1DForward, DWT1DInverse
+from pytorch_wavelets import DWT1DForward, DWT1DInverse
 from torchvision.io import read_image, write_png
 from torchvision.utils import make_grid
+from torchvision import transforms
 
 from sklearn.decomposition import PCA
+from scipy.signal import butter
+
 from diffusers.utils import export_to_video
 
 
@@ -214,31 +217,57 @@ def sma_local(images, v0hat, accelerator, delta=0.05, base=1.):
     return loss_sma_local
 
 
-def sma_global(images, v0hat, wavelet_type='haar', num_levels=3, ld_levels=[1., 1., 1., 1.]):
-    b,c,f,h,w = images.shape
-    images = images.permute(0, 1, 3, 4, 2).reshape(b, c*h*w, f).float() 
-    v0hat = v0hat.permute(0, 1, 3, 4, 2).reshape(b, c*h*w, f).float() 
+def sma_global(z0, z0hat, wavelet_type='haar', num_levels=3, ld_levels=[1., 0.1, 0.1, 0.1]):
+    b, f, c, h, w = z0.shape
 
-    img_residuals = torch.abs(images[:, :, 1:] - images[:, :, :-1])
-    v0hat_residuals = torch.abs(v0hat[:, :, 1:] - v0hat[:, :, :-1])
+    z0_flatten = z0.permute(0, 2, 3, 4, 1).reshape(b, c*h*w, f).float()
+    z0hat_flatten = z0hat.permute(0, 2, 3, 4, 1).reshape(b, c*h*w, f) 
 
-    dwt = DWT1DForward(wave=wavelet_type, J=num_levels).cuda()
-    images_l, images_h = dwt(img_residuals)
-    v0hat_l, v0hat_h = dwt(v0hat_residuals)
+    dwt = DWT1DForward(wave=wavelet_type, J=num_levels).to(z0.device, dtype=z0_flatten.dtype)
+    z0_l, z0_h = dwt(z0_flatten)
+    z0hat_l, z0hat_h = dwt(z0hat_flatten)
 
     l1_loss = 0.0
-    l1_loss += torch.abs(images_l - v0hat_l).mean() * ld_levels[0]
+    # l1_loss += torch.abs(images_l - v0hat_l).mean() * ld_levels[0]
 
-    for i, (c1, c2) in enumerate(zip(images_h, v0hat_h)):
+    for i, (c1, c2) in enumerate(zip(z0_h, z0hat_h)):
         l1_loss += torch.abs(c1 - c2).mean() * ld_levels[i + 1]
     return l1_loss
 
-if __name__ == "__main__":
-    # ckpt = torch.load("checkpoints/lr_1e-3_spatial_temporal_dog-agility/checkpoint-500/motion_embedding.pth")
-    # print(ckpt.keys())
-    # for i in range(42):
-    #     appearance_emb = ckpt[f"transformer_blocks.{str(i)}.motion_embedding.appearance_emb"]
-    #     appearance_emb = appearance_emb.to(torch.float32)
-    #     save_tensor_as_images(appearance_emb[None], root=f"vis_emb/{str(i)}")
 
-    video_to_grid("outputs/A_goat_is_weaving_through_the_obstacles_in_an_S-shaped_pattern/lr_1e-3_spatial_temporal_w_tl_0.1_bs_4_dog-agility_checkpoint-500_42.mp4", nframe=4, nrow=4)
+if __name__ == "__main__":
+    from diffusers.pipelines.cogvideo.pipeline_cogvideox import CogVideoXPipeline
+
+    with torch.no_grad():
+        pipe = CogVideoXPipeline.from_pretrained(
+            "THUDM/CogVideoX-5b",
+            torch_dtype=torch.bfloat16
+        ).to("cuda:0")
+
+        pipe.vae.enable_tiling()
+
+        import decord
+        decord.bridge.set_bridge("torch")
+
+        train_transforms = transforms.Compose(
+            [
+                transforms.Lambda(lambda x: x / 255.0 * 2.0 - 1.0),
+            ]
+        )
+        video_reader = decord.VideoReader("data/breakdance-flare/videos/breakdance-flare.mp4", width=720, height=480)
+        frames = video_reader.get_batch(list(range(49)))
+        frames = frames.float()
+        frames = torch.stack([train_transforms(frame) for frame in frames], dim=0)
+        video = frames.permute(0, 3, 1, 2).contiguous()    # [F, C, H, W]
+
+        video = video.to(pipe.vae.device, dtype=pipe.vae.dtype)[None]
+        video = video.permute(0, 2, 1, 3, 4)
+        latent = pipe.vae.encode(video).latent_dist.sample() # [B, C, F, H, W]
+        latent = latent * pipe.vae_scaling_factor_image
+        b, c, f, h, w = latent.shape
+        latent = latent.permute(0, 1, 3, 4, 2).flatten(1, 3)    # [B, CHW, F]
+
+        dwt = DWT1DForward(wave="haar", J=3).to(latent.device, dtype=latent.dtype)
+        latent_l, latent_h = dwt(latent)
+
+        latent_l = latent_l.reshape(b, c, h, w, f).permute(0, 1, 4, 2, 3)

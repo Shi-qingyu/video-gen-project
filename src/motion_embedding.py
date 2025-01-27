@@ -104,16 +104,19 @@ class ScaleShiftEmbedding(nn.Module):
         self.frames = frames
         self.dim = dim
 
-        self.scale_emb = nn.Parameter(torch.zeros(size=(height, width, dim)))
-        self.shift_emb = nn.Parameter(torch.zeros(size=(frames, dim)))
+        self.shift_emb = nn.Parameter(torch.zeros(size=(height, width, dim)))
+        self.scale_emb = nn.Parameter(torch.zeros(size=(frames, dim)))
     
     def forward(self, hidden_states: torch.Tensor, train=True):
         batch, seq_len, dim = hidden_states.shape
 
-        shift_emb = self.shift_emb.reshape(self.frames, 1, 1, self.dim).repeat(1, self.height, self.width, 1)
-        shift_emb = shift_emb.flatten(0, 2)[None]
-        scale_emb = self.scale_emb.reshape(1, self.height, self.width, self.dim).repeat(self.frames, 1, 1, 1)
+        scale_emb = self.scale_emb.reshape(self.frames, 1, 1, self.dim).repeat(1, self.height, self.width, 1)
         scale_emb = scale_emb.flatten(0, 2)[None]
+        shift_emb = self.shift_emb.reshape(1, self.height, self.width, self.dim).repeat(self.frames, 1, 1, 1)
+        shift_emb = shift_emb.flatten(0, 2)[None]
+
+        scale_emb = scale_emb.to(dtype=hidden_states.dtype, device=hidden_states.device)
+        shift_emb = shift_emb.to(dtype=hidden_states.dtype, device=hidden_states.device)
 
         hidden_states = hidden_states * (1 + scale_emb) + shift_emb
         return hidden_states
