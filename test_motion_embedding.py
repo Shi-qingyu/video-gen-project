@@ -6,7 +6,7 @@ from diffusers.utils import export_to_video
 
 from src.motion_embedding import inject_and_load_motion_embedding
 
-prompt = "An astronaut is dancing hip-hop on the floor."
+prompt = "A robot is dancing hip-hop on the floor."
 seed = 42
 device = "cuda:0"
 ckpt_path = "checkpoints/lr_1e-3_spatial_temporal_w_tl_0.1_hfl_0.1_breakdance-flare/checkpoint-500/motion_embedding.pth"
@@ -19,7 +19,7 @@ pipe = CogVideoXPipeline.from_pretrained(
 
 inject_and_load_motion_embedding(
     pipe.transformer,
-    ckpt_path=ckpt_path, 
+    ckpt_path=ckpt_path,
     version="spatial_temporal",
     train=True,
 )

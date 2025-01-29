@@ -16,6 +16,7 @@ from sklearn.decomposition import PCA
 from scipy.signal import butter
 
 from diffusers.utils import export_to_video
+from diffusers.pipelines.cogvideo.pipeline_cogvideox import CogVideoXPipeline
 
 
 DATA_ROOT = "./data"
@@ -196,7 +197,7 @@ def w_low_freq_local(height, width, delta=0.05, base=1.):
 
 
 def sma_local(images, v0hat, accelerator, delta=0.05, base=1.):
-    b,c,f,h,w = images.shape
+    b, c, f, h, w = images.shape
     img_residuals = torch.abs(images[:, :, 1:, :, :] - images[:, :, :-1, :, :])
     fft_img_residuals = fft.fftn(img_residuals.float(), dim=(-2, -1))
     fft_img_residuals = fft.fftshift(fft_img_residuals, dim=(-2, -1))
@@ -235,6 +236,42 @@ def sma_global(z0, z0hat, wavelet_type='haar', num_levels=3, ld_levels=[1., 0.1,
     return l1_loss
 
 
+def high_frequency_filter(latent, cutoff_frequency=3):
+    """
+    Filters low-frequency components in the latent tensor by keeping only high-frequency components.
+
+    Parameters:
+        latent (torch.Tensor): The latent tensor of shape [B, CHW, F].
+        cutoff_frequency (int): The frequency cutoff to separate low and high frequencies.
+
+    Returns:
+        torch.Tensor: The filtered latent tensor with high frequencies retained.
+    """
+    # Get the shape of the latent tensor
+    b, chw, f = latent.shape
+    
+    # Perform FFT along the frequency axis (axis=2, which is the F dimension)
+    latent_fft = torch.fft.fft(latent, dim=-1)
+    
+    # Create a mask to filter out low frequencies (center part of the FFT)
+    # The cutoff_frequency determines how much of the center we keep (low frequency part)
+    # For simplicity, we keep only frequencies greater than the cutoff_frequency
+    latent_fft_filtered = latent_fft.clone()
+    
+    # Set low frequencies (near the center) to zero
+    # Frequencies below the cutoff frequency will be zeroed out
+    latent_fft_filtered[..., :cutoff_frequency] = 0
+    latent_fft_filtered[..., -cutoff_frequency:] = 0
+    
+    # Perform the inverse FFT to get back to the time/space domain
+    latent_filtered = torch.fft.ifft(latent_fft_filtered, dim=-1)
+    
+    # Take the real part of the inverse FFT as we expect real values
+    latent_filtered = latent_filtered.real
+
+    return latent_filtered
+
+
 if __name__ == "__main__":
     from diffusers.pipelines.cogvideo.pipeline_cogvideox import CogVideoXPipeline
 
@@ -263,11 +300,14 @@ if __name__ == "__main__":
         video = video.to(pipe.vae.device, dtype=pipe.vae.dtype)[None]
         video = video.permute(0, 2, 1, 3, 4)
         latent = pipe.vae.encode(video).latent_dist.sample() # [B, C, F, H, W]
-        latent = latent * pipe.vae_scaling_factor_image
+        latent = latent * pipe.vae.config.scaling_factor
         b, c, f, h, w = latent.shape
         latent = latent.permute(0, 1, 3, 4, 2).flatten(1, 3)    # [B, CHW, F]
 
-        dwt = DWT1DForward(wave="haar", J=3).to(latent.device, dtype=latent.dtype)
-        latent_l, latent_h = dwt(latent)
+        latent = high_frequency_filter(latent.float())  # [B, CHW, F]
 
-        latent_l = latent_l.reshape(b, c, h, w, f).permute(0, 1, 4, 2, 3)
+        latent = latent.reshape(b, c, h, w, f).permute(0, 1, 4, 2, 3).to(pipe.dtype)
+        latent = latent / pipe.vae_scaling_factor_image
+        video = pipe.vae.decode(latent).sample
+        video = pipe.video_processor.postprocess_video(video=video, output_type="pil")[0]
+        export_to_video(video, output_video_path="test.mp4", fps=8)

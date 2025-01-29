@@ -48,7 +48,7 @@ from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_
 from diffusers.utils.torch_utils import is_compiled_module
 
 from src.motion_embedding import inject_and_load_motion_embedding, inject_motion_embedding, save_motion_embedding
-from utils import sma_global
+from utils import high_frequency_filter
 
 if is_wandb_available():
     import wandb
@@ -325,6 +325,12 @@ def get_args():
         help="Whether or not to use high frequency loss."
     )
     parser.add_argument(
+        "--high_frequency_loss_weight",
+        type=float,
+        default=1e-1,
+        help="High frequency loss weights."
+    )
+    parser.add_argument(
         "--tracking_loss",
         action="store_true",
         default=False,
@@ -333,7 +339,7 @@ def get_args():
     parser.add_argument(
         "--tracking_loss_weight",
         type=float,
-        default=1e-2,
+        default=1e-1,
         help="Tracking loss weights."
     )
 
@@ -1299,10 +1305,18 @@ def main(args):
                     )
                     tracking_loss = tracking_loss.mean()
                     loss = loss + args.tracking_loss_weight * tracking_loss
+                    del model_pred_
 
                 if args.high_frequency_loss:
-                    high_frequency_loss = sma_global(target, model_pred)
-                    loss = loss + high_frequency_loss
+                    target = target.permute(0, 2, 3, 4, 1).flatten(1, 3).float()
+                    model_pred = model_pred.permute(0, 2, 3, 4, 1).flatten(1, 3).float()
+
+                    hf_target = high_frequency_filter(target)
+                    hf_model_pred = high_frequency_filter(model_pred)
+                    
+                    hf_loss = torch.mean((weights * (hf_target - hf_model_pred) ** 2).reshape(batch_size, -1), dim=1)
+                    hf_loss = hf_loss.mean()
+                    loss = loss + args.high_frequency_loss_weight * hf_loss
 
                 accelerator.backward(loss)
 

@@ -1,10 +1,10 @@
 #!/bin/bash
 
-export VERSION="adaptive_spatial_temporal"
+export VERSION="spatial_temporal"
 
 export MODEL_PATH="THUDM/CogVideoX-5b"
 export DATASET_PATH="data/breakdance-flare"
-export OUTPUT_PATH="checkpoints/lr_1e-3_${VERSION}_breakdance-flare"
+export OUTPUT_PATH="checkpoints/lr_1e-3_${VERSION}_tl_0.1_hfl_0.1_breakdance-flare"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 
@@ -39,6 +39,7 @@ accelerate launch --config_file configs/accelerate_config_machine_single.yaml --
   --adam_beta1 0.9 \
   --adam_beta2 0.95 \
   --version $VERSION \
-  # --high_frequency_loss \
-  # --tracking_loss \
-  # --tracking_loss_weight 0.1
+  --high_frequency_loss \
+  --high_frequency_loss_weight 0.1 \
+  --tracking_loss \
+  --tracking_loss_weight 0.1
