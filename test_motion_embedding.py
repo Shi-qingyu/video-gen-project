@@ -9,7 +9,7 @@ from src.motion_embedding import inject_and_load_motion_embedding
 prompt = "A robot is dancing hip-hop on the floor."
 seed = 42
 device = "cuda:0"
-ckpt_path = "checkpoints/lr_1e-3_spatial_temporal_w_tl_0.1_hfl_0.1_breakdance-flare/checkpoint-500/motion_embedding.pth"
+ckpt_path = "checkpoints/lr_1e-3_adaptive_spatial_temporal_breakdance-flare/checkpoint-500/motion_embedding.pth"
 config = "_".join(ckpt_path.split("/")[1: 3])
 
 pipe = CogVideoXPipeline.from_pretrained(
@@ -20,7 +20,7 @@ pipe = CogVideoXPipeline.from_pretrained(
 inject_and_load_motion_embedding(
     pipe.transformer,
     ckpt_path=ckpt_path,
-    version="spatial_temporal",
+    version="adaptive_spatial_temporal",
     train=True,
 )
 

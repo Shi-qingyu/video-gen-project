@@ -1285,38 +1285,39 @@ def main(args):
                 loss = torch.mean((weights * (model_pred - target) ** 2).reshape(batch_size, -1), dim=1)
                 loss = loss.mean()
 
-                if args.tracking_loss:
-                    tracking_points = batch["tracks"].to(accelerator.device)    # [B, F, N, 2]
-                    frame_ids = torch.linspace(0, tracking_points.size(1) - 1, num_frames).to(torch.int32)
-                    tracking_points = tracking_points[:, frame_ids]
-                    batch_size, _, num_trajectories, _ = tracking_points.shape
-                    model_pred_ = model_pred.permute(0, 1, 3, 4, 2)  # [B, F, H, W, C]
-                    batch_ids = torch.arange(batch_size)[:, None, None].repeat(1, num_trajectories, num_frames).to(accelerator.device)
-                    frame_ids = torch.arange(num_frames)[None, None, :].repeat(batch_size, num_trajectories, 1).to(accelerator.device)
-                    h_coor = tracking_points[:, :, :, 1].transpose(1, 2).to(accelerator.device) * height
-                    w_coor = tracking_points[:, :, :, 0].transpose(1, 2).to(accelerator.device) * width
-                    h_coor = h_coor.to(torch.int32).clamp(0, height - 1)
-                    w_coor = w_coor.to(torch.int32).clamp(0, width - 1)
+                if timesteps <= 400:
+                    if args.tracking_loss:
+                        tracking_points = batch["tracks"].to(accelerator.device)    # [B, F, N, 2]
+                        frame_ids = torch.linspace(0, tracking_points.size(1) - 1, num_frames).to(torch.int32)
+                        tracking_points = tracking_points[:, frame_ids]
+                        batch_size, _, num_trajectories, _ = tracking_points.shape
+                        model_pred_ = model_pred.permute(0, 1, 3, 4, 2)  # [B, F, H, W, C]
+                        batch_ids = torch.arange(batch_size)[:, None, None].repeat(1, num_trajectories, num_frames).to(accelerator.device)
+                        frame_ids = torch.arange(num_frames)[None, None, :].repeat(batch_size, num_trajectories, 1).to(accelerator.device)
+                        h_coor = tracking_points[:, :, :, 1].transpose(1, 2).to(accelerator.device) * height
+                        w_coor = tracking_points[:, :, :, 0].transpose(1, 2).to(accelerator.device) * width
+                        h_coor = h_coor.to(torch.int32).clamp(0, height - 1)
+                        w_coor = w_coor.to(torch.int32).clamp(0, width - 1)
 
-                    # [B, N, F, C]
-                    trajectory_embeddings = model_pred_[batch_ids, frame_ids, h_coor, w_coor]
-                    tracking_loss = torch.mean(
-                        ((trajectory_embeddings[:, :, 1:] - trajectory_embeddings[:, :, :-1]) ** 2).reshape(batch_size, -1), dim=1
-                    )
-                    tracking_loss = tracking_loss.mean()
-                    loss = loss + args.tracking_loss_weight * tracking_loss
-                    del model_pred_
+                        # [B, N, F, C]
+                        trajectory_embeddings = model_pred_[batch_ids, frame_ids, h_coor, w_coor]
+                        tracking_loss = torch.mean(
+                            ((trajectory_embeddings[:, :, 1:] - trajectory_embeddings[:, :, :-1]) ** 2).reshape(batch_size, -1), dim=1
+                        )
+                        tracking_loss = tracking_loss.mean()
+                        loss = loss + args.tracking_loss_weight * tracking_loss
+                        del model_pred_
 
-                if args.high_frequency_loss:
-                    target = target.permute(0, 2, 3, 4, 1).flatten(1, 3).float()
-                    model_pred = model_pred.permute(0, 2, 3, 4, 1).flatten(1, 3).float()
+                    if args.high_frequency_loss:
+                        target = target.permute(0, 2, 3, 4, 1).flatten(1, 3).float()
+                        model_pred = model_pred.permute(0, 2, 3, 4, 1).flatten(1, 3).float()
 
-                    hf_target = high_frequency_filter(target)
-                    hf_model_pred = high_frequency_filter(model_pred)
-                    
-                    hf_loss = torch.mean((weights * (hf_target - hf_model_pred) ** 2).reshape(batch_size, -1), dim=1)
-                    hf_loss = hf_loss.mean()
-                    loss = loss + args.high_frequency_loss_weight * hf_loss
+                        hf_target = high_frequency_filter(target)
+                        hf_model_pred = high_frequency_filter(model_pred)
+                        
+                        hf_loss = torch.mean((weights * (hf_target - hf_model_pred) ** 2).reshape(batch_size, -1), dim=1)
+                        hf_loss = hf_loss.mean()
+                        loss = loss + args.high_frequency_loss_weight * hf_loss
 
                 accelerator.backward(loss)
 

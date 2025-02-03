@@ -4,6 +4,8 @@ import numpy as np
 import imageio
 import json
 
+from typing import Optional
+
 import torch
 import torch.nn.functional as F
 import torch.fft as fft
@@ -44,7 +46,7 @@ def extract_frames_from_video(src_path, tgt_path, num_frames):
     export_to_video(frames, tgt_path, fps=8)
 
 
-def make_grid_for_frames(frame_dir: str, nframe=4, nrow=13, is_mask=False):
+def make_grid_for_frames(frame_dir: str, nframe=4, nrow=13, is_mask=False, frame_ids=Optional[list]):
     if isinstance(frame_dir, str):
         frame_dir = Path(frame_dir)
 
@@ -69,6 +71,12 @@ def make_grid_for_frames(frame_dir: str, nframe=4, nrow=13, is_mask=False):
     func = lambda x: int(x.stem)
     images = sorted(images, key=func)
     ids = np.linspace(0, len(images)-1, num=nframe).astype(np.int32)
+
+    if frame_ids is not None:
+        if isinstance(frame_ids, list):
+            assert max(frame_ids) <= len(images) - 1, f"frame ids = {frame_ids} out of range!"
+            ids = frame_ids
+
     bank = []
     for id in ids:
         bank.append(read_image(images[id]))
@@ -272,42 +280,43 @@ def high_frequency_filter(latent, cutoff_frequency=3):
     return latent_filtered
 
 
-if __name__ == "__main__":
-    from diffusers.pipelines.cogvideo.pipeline_cogvideox import CogVideoXPipeline
+def video2video_with_high_frequency_filter(pretrained_model_name_or_path, video_path, output_video_path, device="cuda"):
+    pipe = CogVideoXPipeline.from_pretrained(
+        pretrained_model_name_or_path,
+        torch_dtype=torch.bfloat16
+    ).to(device)
+    pipe.vae.enable_tiling()
+
+    import decord
+    decord.bridge.set_bridge("torch")
+
+    train_transforms = transforms.Compose(
+        [
+            transforms.Lambda(lambda x: x / 255.0 * 2.0 - 1.0)
+        ]
+    )
+    video_reader = decord.VideoReader(video_path, width=720, height=480)
+    frames = video_reader.get_batch(list(range(49)))
+    frames = frames.float()
+    frames = torch.stack([train_transforms(frame) for frame in frames], dim=0)
+    video = frames.permute(0, 3, 1, 2).contiguous()    # [F, C, H, W]
+    video = video.to(pipe.vae.device, dtype=pipe.vae.dtype)[None]
+    video = video.permute(0, 2, 1, 3, 4)
 
     with torch.no_grad():
-        pipe = CogVideoXPipeline.from_pretrained(
-            "THUDM/CogVideoX-5b",
-            torch_dtype=torch.bfloat16
-        ).to("cuda:0")
-
-        pipe.vae.enable_tiling()
-
-        import decord
-        decord.bridge.set_bridge("torch")
-
-        train_transforms = transforms.Compose(
-            [
-                transforms.Lambda(lambda x: x / 255.0 * 2.0 - 1.0),
-            ]
-        )
-        video_reader = decord.VideoReader("data/breakdance-flare/videos/breakdance-flare.mp4", width=720, height=480)
-        frames = video_reader.get_batch(list(range(49)))
-        frames = frames.float()
-        frames = torch.stack([train_transforms(frame) for frame in frames], dim=0)
-        video = frames.permute(0, 3, 1, 2).contiguous()    # [F, C, H, W]
-
-        video = video.to(pipe.vae.device, dtype=pipe.vae.dtype)[None]
-        video = video.permute(0, 2, 1, 3, 4)
         latent = pipe.vae.encode(video).latent_dist.sample() # [B, C, F, H, W]
         latent = latent * pipe.vae.config.scaling_factor
         b, c, f, h, w = latent.shape
-        latent = latent.permute(0, 1, 3, 4, 2).flatten(1, 3)    # [B, CHW, F]
+        latent = latent.permute(0, 1, 3, 4, 2).flatten(1, 3)
 
-        latent = high_frequency_filter(latent.float())  # [B, CHW, F]
+        latent = high_frequency_filter(latent.float())
 
         latent = latent.reshape(b, c, h, w, f).permute(0, 1, 4, 2, 3).to(pipe.dtype)
         latent = latent / pipe.vae_scaling_factor_image
         video = pipe.vae.decode(latent).sample
         video = pipe.video_processor.postprocess_video(video=video, output_type="pil")[0]
-        export_to_video(video, output_video_path="test.mp4", fps=8)
+        export_to_video(video, output_video_path=output_video_path, fps=8)
+
+
+if __name__ == "__main__":
+    video_to_grid("outputs/A_robot_is_dancing_hip-hop_on_the_floor/lr_1e-3_spatial_temporal_w_tl_0.1_breakdance-flare_checkpoint-500_42.mp4", nframe=4, nrow=4)
