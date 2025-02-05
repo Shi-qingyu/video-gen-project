@@ -342,6 +342,12 @@ def get_args():
         default=1e-1,
         help="Tracking loss weights."
     )
+    parser.add_argument(
+        "--mse_weight",
+        type=float,
+        default=1,
+        help="MSE weight"
+    )
 
     # Optimizer
     parser.add_argument(
@@ -1283,7 +1289,7 @@ def main(args):
                 target = model_input
 
                 loss = torch.mean((weights * (model_pred - target) ** 2).reshape(batch_size, -1), dim=1)
-                loss = loss.mean()
+                loss = args.mse_weight * loss.mean()
 
                 if timesteps <= 400:
                     if args.tracking_loss:

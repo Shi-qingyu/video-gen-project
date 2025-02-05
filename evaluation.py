@@ -106,4 +106,4 @@ def motion_fidelity_score():
 
 
 if __name__ == "__main__":
-    print(dino_score(root="outputs_benchmark", device="cuda"))
+    print(clip_score(root="outputs_benchmark", device="cuda"))

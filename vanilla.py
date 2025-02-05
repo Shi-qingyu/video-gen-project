@@ -15,8 +15,8 @@ from utils import save_tensor_as_images
 
 SEED = 42
 
-prompt = "A man riding a horse jumping over a fence."
-device = "cuda:3"
+prompt = "A robot is dancing hip-hop in the desert."
+device = "cuda:2"
 intermediate_layer = 20
 
 
