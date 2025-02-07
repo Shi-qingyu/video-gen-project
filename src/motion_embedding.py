@@ -96,6 +96,38 @@ class SpatialTemporalEmbedding(nn.Module):
         return hidden_states + emb[None]
 
 
+class AdaptiveTemporalEmbedding(nn.Module):
+    def __init__(self, height, width, frames, dim, complexity) -> None:
+        super().__init__()
+        self.height = height
+        self.width = width
+        self.frames = frames
+        self.dim = dim
+
+        # self.background_emb = nn.Parameter(torch.zeros(size=(frames, dim)))
+        self.motion_emb = nn.Parameter(torch.zeros(size=(complexity, frames, dim)))
+    
+    def forward(self, hidden_states: torch.Tensor, trajectories: torch.Tensor):
+        batch_size, seq_len, dim = hidden_states.shape
+        hidden_states = hidden_states.reshape(batch_size, self.frames, self.height, self.width, -1)
+
+        # trajectories: [B, N, F, 2]
+        batch_size, N, frames, _ = trajectories.shape
+
+        batch_ids = torch.arange(batch_size)[:, None, None].repeat(1, N, frames).to(hidden_states.device)
+        frame_ids = torch.arange(frames)[None, None, :].repeat(batch_size, N, 1).to(hidden_states.device)
+        w_coor = trajectories[:, :, :, 0] * self.width
+        w_coor = w_coor.to(torch.int32).clamp(0, self.width - 1)
+        h_coor = trajectories[:, :, :, 1] * self.height
+        h_coor = h_coor.to(torch.int32).clamp(0, self.height - 1)
+
+        motion_emb = self.motion_emb[None].repeat(batch_size, 1, 1, 1)
+        hidden_states[batch_ids, frame_ids, h_coor, w_coor] = hidden_states[batch_ids, frame_ids, h_coor, w_coor] + motion_emb
+        hidden_states = hidden_states.flatten(1, 3)
+
+        return hidden_states
+
+
 class ScaleShiftEmbedding(nn.Module):
     def __init__(self, height, width, frames, dim) -> None:
         super().__init__()
@@ -123,14 +155,26 @@ class ScaleShiftEmbedding(nn.Module):
     
 
 def inject_motion_embedding(transformer: CogVideoXTransformer3DModel, train=True, version="", **kwargs):
-    def CogVideoXBlock_forward(self, hidden_states, encoder_hidden_states, temb, image_rotary_emb):
+    num_layers = transformer.config.num_layers
+
+    def CogVideoXBlock_forward(self, hidden_states, encoder_hidden_states, temb, image_rotary_emb, **kwargs):
+
+        attention_kwargs = kwargs.get("attention_kwargs", None)
+        if attention_kwargs is not None:
+            timestep = attention_kwargs.get("timestep", None)
+        else:
+            timestep = None
+
         text_seq_length = encoder_hidden_states.size(1)
 
         # norm & modulate
         norm_hidden_states, norm_encoder_hidden_states, gate_msa, enc_gate_msa = self.norm1(
             hidden_states, encoder_hidden_states, temb
         )
-        norm_hidden_states = self.motion_embedding(norm_hidden_states, train=train)
+
+        if timestep is None or timestep < 30:
+            # motion injection
+            norm_hidden_states = self.motion_embedding(norm_hidden_states, train=train)
 
         # attention
         attn_hidden_states, attn_encoder_hidden_states = self.attn1(
@@ -163,7 +207,7 @@ def inject_motion_embedding(transformer: CogVideoXTransformer3DModel, train=True
 
     trainable_parameters = []
     for name, module in transformer.named_modules():
-        if module.__class__.__name__ == "CogVideoXBlock":
+        if module.__class__.__name__ == "CogVideoXBlock" or module.__class__.__name__ == "MyCogVideoXBlock":
             block_idx = int(name.split(".")[-1])
             module.forward = CogVideoXBlock_forward.__get__(module, CogVideoXBlock)
             if version == "spatial":

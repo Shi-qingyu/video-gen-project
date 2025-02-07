@@ -5,25 +5,36 @@ from diffusers import CogVideoXPipeline
 from diffusers.utils import export_to_video
 
 from src.motion_embedding import inject_and_load_motion_embedding
+from src.pipeline import MyCogVideoXPipeline
+from src.transformer import MyCogVideoXTransformer3DModel
 
 prompt = "A robot is dancing hip-hop in the desert."
 seed = 42
 device = "cuda:1"
-ckpt_path = "checkpoints/lr_1e-3_spatial_temporal_tl_0.1_hfl_0.8_mse_0.2_breakdance-flare/checkpoint-500/motion_embedding.pth"
+ckpt_path = "checkpoints/lr_1e-3_spatial_temporal_w_tl_0.1_hfl_0.1_breakdance-flare/checkpoint-500/motion_embedding.pth"
 config = "_".join(ckpt_path.split("/")[1: 3])
 
-pipe = CogVideoXPipeline.from_pretrained(
+pipe = MyCogVideoXPipeline.from_pretrained(
     "THUDM/CogVideoX-5b",
+    torch_dtype=torch.bfloat16
+)
+del pipe.transformer
+torch.cuda.empty_cache()
+
+transformer = MyCogVideoXTransformer3DModel.from_pretrained(
+    "THUDM/CogVideoX-5b",
+    subfolder="transformer",
     torch_dtype=torch.bfloat16
 )
 
 inject_and_load_motion_embedding(
-    pipe.transformer,
+    transformer,
     ckpt_path=ckpt_path,
     version="spatial_temporal",
     train=True,
 )
 
+pipe.transformer = transformer
 pipe.to(device)
 pipe.vae.enable_tiling()
 

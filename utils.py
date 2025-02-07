@@ -20,6 +20,9 @@ from scipy.signal import butter
 from diffusers.utils import export_to_video
 from diffusers.pipelines.cogvideo.pipeline_cogvideox import CogVideoXPipeline
 
+import numpy as np
+from sklearn.cluster import KMeans
+
 
 DATA_ROOT = "./data"
 
@@ -316,6 +319,9 @@ def video2video_with_high_frequency_filter(pretrained_model_name_or_path, video_
         video = pipe.vae.decode(latent).sample
         video = pipe.video_processor.postprocess_video(video=video, output_type="pil")[0]
         export_to_video(video, output_video_path=output_video_path, fps=8)
+
+
+
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ SEED = 42
 
 prompt = "A robot is dancing hip-hop in the desert."
 device = "cuda:2"
-intermediate_layer = 20
+intermediate_layer = 42
 
 
 @dataclass

@@ -4,5 +4,6 @@ outputs
 outputs_benchmark
 data
 
+cache
 .vscode
 *__pycache__
