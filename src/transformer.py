@@ -26,6 +26,7 @@ class MyCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
         timestep_cond: Optional[torch.Tensor] = None,
         image_rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         attention_kwargs: Optional[Dict[str, Any]] = None,
+        motion_module_kwargs: Optional[Dict[str, Any]] = None,
         return_dict: bool = True,
     ):
         if attention_kwargs is not None:
@@ -71,7 +72,7 @@ class MyCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
                     encoder_hidden_states,
                     emb,
                     image_rotary_emb,
-                    attention_kwargs,
+                    motion_module_kwargs,
                     **ckpt_kwargs,
                 )
             else:
@@ -80,7 +81,7 @@ class MyCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
                     encoder_hidden_states=encoder_hidden_states,
                     temb=emb,
                     image_rotary_emb=image_rotary_emb,
-                    attention_kwargs=attention_kwargs
+                    motion_module_kwargs=motion_module_kwargs,
                 )
 
         if not self.config.use_rotary_positional_embeddings:

@@ -6,6 +6,9 @@ from diffusers.models.transformers.cogvideox_transformer_3d import CogVideoXBloc
 from diffusers import CogVideoXPipeline
 from diffusers.utils import export_to_video
 
+from .utils import mask2bbox
+
+
 class SpatialEmbedding(nn.Module):
     def __init__(self, height, width, frames, dim) -> None:
         super().__init__()
@@ -71,7 +74,7 @@ class SpatialTemporalEmbedding(nn.Module):
         self.appearance_emb = nn.Parameter(torch.zeros(size=(height, width, dim)))
         self.motion_emb = nn.Parameter(torch.zeros(size=(frames, dim)))
     
-    def forward(self, hidden_states: torch.Tensor, train=True):
+    def forward(self, hidden_states: torch.Tensor, train=True, local_trajectories=None, **kwargs):
         batch, seq_len, dim = hidden_states.shape
 
         motion_emb = self.motion_emb.reshape(self.frames, 1, 1, self.dim).repeat(1, self.height, self.width, 1)
@@ -97,34 +100,68 @@ class SpatialTemporalEmbedding(nn.Module):
 
 
 class AdaptiveTemporalEmbedding(nn.Module):
-    def __init__(self, height, width, frames, dim, complexity) -> None:
+    def __init__(self, height, width, frames, dim, complexity=8) -> None:
         super().__init__()
         self.height = height
         self.width = width
         self.frames = frames
         self.dim = dim
 
-        # self.background_emb = nn.Parameter(torch.zeros(size=(frames, dim)))
         self.motion_emb = nn.Parameter(torch.zeros(size=(complexity, frames, dim)))
     
-    def forward(self, hidden_states: torch.Tensor, trajectories: torch.Tensor):
+    def forward(self, hidden_states: torch.Tensor, train: bool, local_trajectories: torch.Tensor, **kwargs):
         batch_size, seq_len, dim = hidden_states.shape
         hidden_states = hidden_states.reshape(batch_size, self.frames, self.height, self.width, -1)
 
-        # trajectories: [B, N, F, 2]
-        batch_size, N, frames, _ = trajectories.shape
+        # local_trajectories: [B, F, N, 2]
+        batch_size, frames, N, _ = local_trajectories.shape
+        local_trajectories = local_trajectories.transpose(1, 2) # [B, N, F, 2]
 
         batch_ids = torch.arange(batch_size)[:, None, None].repeat(1, N, frames).to(hidden_states.device)
         frame_ids = torch.arange(frames)[None, None, :].repeat(batch_size, N, 1).to(hidden_states.device)
-        w_coor = trajectories[:, :, :, 0] * self.width
+        w_coor = local_trajectories[:, :, :, 0] * self.width
         w_coor = w_coor.to(torch.int32).clamp(0, self.width - 1)
-        h_coor = trajectories[:, :, :, 1] * self.height
+        h_coor = local_trajectories[:, :, :, 1] * self.height
         h_coor = h_coor.to(torch.int32).clamp(0, self.height - 1)
 
-        motion_emb = self.motion_emb[None].repeat(batch_size, 1, 1, 1)
+        motion_emb = self.motion_emb
+        motion_emb = motion_emb[None].to(dtype=hidden_states.dtype, device=hidden_states.device)
         hidden_states[batch_ids, frame_ids, h_coor, w_coor] = hidden_states[batch_ids, frame_ids, h_coor, w_coor] + motion_emb
         hidden_states = hidden_states.flatten(1, 3)
 
+        return hidden_states
+
+
+class AdaptiveMaskTemporalEmbedding(nn.Module):
+    def __init__(self, height, width, frames, dim, complexity=8) -> None:
+        super().__init__()
+        self.height = height
+        self.width = width
+        self.frames = frames
+        self.dim = dim
+
+        self.motion_emb = nn.Parameter(torch.zeros(size=(frames, complexity, complexity, dim)))
+    
+    def forward(self, hidden_states: torch.Tensor, train: bool, masks: torch.Tensor, **kwargs):
+        batch_size, seq_len, dim = hidden_states.shape
+        hidden_states = hidden_states.reshape(batch_size, self.frames, self.height, self.width, -1)
+
+        # bbox: [B, F, 4]
+        bbox = mask2bbox(mask=masks)
+        motion_emb = self.motion_emb[None].repeat(batch_size, 1, 1, 1, 1)
+
+        for b in range(motion_emb.shape[0]):
+            for f in range(motion_emb.shape[1]):
+                motion_emb_t = motion_emb[b, f] # [complexity, complexity, dim]
+                bbox_t = bbox[b, f] # [top_left_y, top_left_x, bottom_right_y, bottom_right_x]
+                motion_emb_t = motion_emb_t.permute(2, 0, 1)[None]
+                motion_emb_t = F.interpolate(
+                    motion_emb_t, size=(bbox_t[2] - bbox_t[0], bbox_t[3] - bbox_t[1]), mode="bilinear", align_corners=True
+                )[0]
+                motion_emb_t = motion_emb_t.permute(1, 2, 0)
+                hidden_states[b, f, bbox_t[0]: bbox_t[2], bbox_t[1]: bbox_t[3]] += motion_emb_t
+
+        hidden_states = hidden_states.flatten(1, 3)
         return hidden_states
 
 
@@ -139,7 +176,7 @@ class ScaleShiftEmbedding(nn.Module):
         self.shift_emb = nn.Parameter(torch.zeros(size=(height, width, dim)))
         self.scale_emb = nn.Parameter(torch.zeros(size=(frames, dim)))
     
-    def forward(self, hidden_states: torch.Tensor, train=True):
+    def forward(self, hidden_states: torch.Tensor, train=True, **kwargs):
         batch, seq_len, dim = hidden_states.shape
 
         scale_emb = self.scale_emb.reshape(self.frames, 1, 1, self.dim).repeat(1, self.height, self.width, 1)
@@ -154,17 +191,20 @@ class ScaleShiftEmbedding(nn.Module):
         return hidden_states
     
 
-def inject_motion_embedding(transformer: CogVideoXTransformer3DModel, train=True, version="", **kwargs):
-    num_layers = transformer.config.num_layers
-
-    def CogVideoXBlock_forward(self, hidden_states, encoder_hidden_states, temb, image_rotary_emb, **kwargs):
-
-        attention_kwargs = kwargs.get("attention_kwargs", None)
-        if attention_kwargs is not None:
-            timestep = attention_kwargs.get("timestep", None)
-        else:
-            timestep = None
-
+def inject_motion_embedding(
+    transformer: CogVideoXTransformer3DModel, 
+    train=True, 
+    version="", 
+    **kwargs
+):
+    def CogVideoXBlock_forward(
+        self, 
+        hidden_states, 
+        encoder_hidden_states, 
+        temb, 
+        image_rotary_emb, 
+        motion_module_kwargs=None,
+    ):
         text_seq_length = encoder_hidden_states.size(1)
 
         # norm & modulate
@@ -172,8 +212,10 @@ def inject_motion_embedding(transformer: CogVideoXTransformer3DModel, train=True
             hidden_states, encoder_hidden_states, temb
         )
 
-        if timestep is None or timestep < 30:
+        if motion_module_kwargs is not None:
             # motion injection
+            norm_hidden_states = self.motion_embedding(norm_hidden_states, train=train, **motion_module_kwargs)
+        else:
             norm_hidden_states = self.motion_embedding(norm_hidden_states, train=train)
 
         # attention
@@ -208,7 +250,6 @@ def inject_motion_embedding(transformer: CogVideoXTransformer3DModel, train=True
     trainable_parameters = []
     for name, module in transformer.named_modules():
         if module.__class__.__name__ == "CogVideoXBlock" or module.__class__.__name__ == "MyCogVideoXBlock":
-            block_idx = int(name.split(".")[-1])
             module.forward = CogVideoXBlock_forward.__get__(module, CogVideoXBlock)
             if version == "spatial":
                 motion_embedding = SpatialEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
@@ -218,12 +259,14 @@ def inject_motion_embedding(transformer: CogVideoXTransformer3DModel, train=True
                 motion_embedding = SpatialTemporalEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
             elif version == "scale_shift":
                 motion_embedding = ScaleShiftEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
-            elif version == "adaptive_spatial_temporal":
-                intermediate = kwargs.get("intermediate", 21)
-                if block_idx < intermediate:
-                    motion_embedding = SpatialEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
-                else:
-                    motion_embedding = TemporalEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
+            elif version == "adaptive_temporal":
+                complexity = kwargs.get("complexity", None)
+                assert complexity is not None, "complexity can't be None in adaptive temporal version!"
+                motion_embedding = AdaptiveTemporalEmbedding(height=height, width=width, frames=frames, dim=dim, complexity=complexity)
+            elif version == "adaptive_mask_temporal":
+                complexity = kwargs.get("complexity", None)
+                assert complexity is not None, "complexity can't be None in adaptive mask temporal version!"
+                motion_embedding = AdaptiveMaskTemporalEmbedding(height=height, width=width, frames=frames, dim=dim, complexity=complexity)                
             else:
                 raise ValueError(f"Unexpected motion embedding version: {version}")
 
@@ -259,8 +302,11 @@ def inject_and_load_motion_embedding(
     ckpt_path: str, 
     version: str, 
     train: bool,
+    **kwargs,
 ):
-    trainable_parameters = inject_motion_embedding(transformer=transformer, train=train, version=version)
+    trainable_parameters = inject_motion_embedding(
+        transformer=transformer, train=train, version=version, **kwargs,
+    )
     ckpt = torch.load(ckpt_path)
     _, unexpected_keys = transformer.load_state_dict(ckpt, strict=False)
     assert len(unexpected_keys) == 0, f"Something wrong with the checkpoint!"

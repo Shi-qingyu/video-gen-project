@@ -73,3 +73,38 @@ def prepare_word_ids(
                 break
     
     return word_ids, word_lens
+
+
+def mask2bbox(mask):
+    """
+    Convert a binary mask into bounding boxes.
+    
+    Args:
+        mask (Tensor): A tensor of shape [B, T, H, W], where B is the batch size, 
+                       T is the time dimension, H is the height, and W is the width.
+                       
+    Returns:
+        bbox (Tensor): A tensor of shape [B, T, 4] where each bounding box is represented as 
+                        [top_left_y, top_left_x, bottom_right_y, bottom_right_x].
+    """
+    # Find the non-zero indices in the mask
+    non_zero = mask.view(mask.shape[0], mask.shape[1], -1).nonzero()
+
+    # Initialize bbox tensor
+    bbox = torch.zeros((mask.shape[0], mask.shape[1], 4), dtype=torch.long)
+
+    for b in range(mask.shape[0]):  # iterate over batch
+        for t in range(mask.shape[1]):  # iterate over time steps
+            # Find the min/max coordinates in the non-zero regions
+            mask_t = mask[b, t]
+            y_non_zero, x_non_zero = torch.where(mask_t != 0)
+            
+            if len(y_non_zero) > 0 and len(x_non_zero) > 0:  # check if there are any non-zero values
+                top_left_y, top_left_x = y_non_zero.min(), x_non_zero.min()
+                bottom_right_y, bottom_right_x = y_non_zero.max(), x_non_zero.max()
+                
+                # Store bounding box coordinates
+                bbox[b, t] = torch.tensor([top_left_y.item(), top_left_x.item(),
+                                           bottom_right_y.item(), bottom_right_x.item()])
+    
+    return bbox

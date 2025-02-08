@@ -48,6 +48,7 @@ from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_
 from diffusers.utils.torch_utils import is_compiled_module
 
 from src.motion_embedding import inject_and_load_motion_embedding, inject_motion_embedding, save_motion_embedding
+from src.transformer import MyCogVideoXTransformer3DModel
 from utils import high_frequency_filter
 
 if is_wandb_available():
@@ -441,8 +442,9 @@ class VideoDataset(Dataset):
         instance_data_root: Optional[str] = None,
         dataset_name: Optional[str] = None,
         dataset_config_name: Optional[str] = None,
-        caption_column: str = "text",
-        video_column: str = "video",
+        caption_column: str = "prompts.txt",
+        video_column: str = "videos.txt",
+        trajectory_column: str = "trajectories.txt",
         height: int = 480,
         width: int = 720,
         fps: int = 8,
@@ -459,6 +461,7 @@ class VideoDataset(Dataset):
         self.dataset_config_name = dataset_config_name
         self.caption_column = caption_column
         self.video_column = video_column
+        self.trajectory_column = trajectory_column
         self.height = height
         self.width = width
         self.fps = fps
@@ -468,10 +471,7 @@ class VideoDataset(Dataset):
         self.cache_dir = cache_dir
         self.id_token = id_token or ""
 
-        if dataset_name is not None:
-            self.instance_prompts, self.instance_video_paths = self._load_dataset_from_hub()
-        else:
-            self.instance_prompts, self.instance_video_paths = self._load_dataset_from_local_path()
+        self.instance_prompts, self.instance_video_paths, self.instance_trajectories = self._load_dataset_from_local_path()
 
         self.num_instance_videos = len(self.instance_video_paths)
         if self.num_instance_videos != len(self.instance_prompts):
@@ -479,7 +479,7 @@ class VideoDataset(Dataset):
                 f"Expected length of instance prompts and videos to be the same but found {len(self.instance_prompts)=} and {len(self.instance_video_paths)=}. Please ensure that the number of caption prompts and videos match in your dataset."
             )
 
-        self.instance_videos = self._preprocess_data()
+        self.instance_videos, self.instance_trajectories, self.instance_local_trajectories = self._preprocess_data()
 
     def __len__(self):
         return self.num_instance_videos
@@ -488,52 +488,9 @@ class VideoDataset(Dataset):
         return {
             "instance_prompt": self.id_token + self.instance_prompts[index],
             "instance_video": self.instance_videos[index],
-            "instance_track": self.tracking_points[index],
+            "instance_trajectory": self.instance_trajectories[index],
+            "instance_local_trajectory": self.instance_local_trajectories[index],
         }
-
-    def _load_dataset_from_hub(self):
-        try:
-            from datasets import load_dataset
-        except ImportError:
-            raise ImportError(
-                "You are trying to load your data using the datasets library. If you wish to train using custom "
-                "captions please install the datasets library: `pip install datasets`. If you wish to load a "
-                "local folder containing images only, specify --instance_data_root instead."
-            )
-
-        # Downloading and loading a dataset from the hub. See more about loading custom images at
-        # https://huggingface.co/docs/datasets/v2.0.0/en/dataset_script
-        dataset = load_dataset(
-            self.dataset_name,
-            self.dataset_config_name,
-            cache_dir=self.cache_dir,
-        )
-        column_names = dataset["train"].column_names
-
-        if self.video_column is None:
-            video_column = column_names[0]
-            logger.info(f"`video_column` defaulting to {video_column}")
-        else:
-            video_column = self.video_column
-            if video_column not in column_names:
-                raise ValueError(
-                    f"`--video_column` value '{video_column}' not found in dataset columns. Dataset columns are: {', '.join(column_names)}"
-                )
-
-        if self.caption_column is None:
-            caption_column = column_names[1]
-            logger.info(f"`caption_column` defaulting to {caption_column}")
-        else:
-            caption_column = self.caption_column
-            if self.caption_column not in column_names:
-                raise ValueError(
-                    f"`--caption_column` value '{self.caption_column}' not found in dataset columns. Dataset columns are: {', '.join(column_names)}"
-                )
-
-        instance_prompts = dataset["train"][caption_column]
-        instance_videos = [Path(self.instance_data_root, filepath) for filepath in dataset["train"][video_column]]
-
-        return instance_prompts, instance_videos
     
     def _load_dataset_from_local_path(self):
         if not self.instance_data_root.exists():
@@ -541,6 +498,7 @@ class VideoDataset(Dataset):
 
         prompt_path = self.instance_data_root.joinpath(self.caption_column)
         video_path = self.instance_data_root.joinpath(self.video_column)
+        trajectory_path = self.instance_data_root.joinpath(self.trajectory_column)
 
         if not prompt_path.exists() or not prompt_path.is_file():
             raise ValueError(
@@ -557,13 +515,17 @@ class VideoDataset(Dataset):
             instance_videos = [
                 self.instance_data_root.joinpath(line.strip()) for line in file.readlines() if len(line.strip()) > 0
             ]
+        with open(trajectory_path, "r", encoding="utf-8") as file:
+            instance_trajectories = [
+                self.instance_data_root.joinpath(line.strip()) for line in file.readlines() if len(line.strip()) > 0
+            ]
 
         if any(not path.is_file() for path in instance_videos):
             raise ValueError(
                 "Expected '--video_column' to be a path to a file in `--instance_data_root` containing line-separated paths to video data but found atleast one path that is not a valid file."
             )
 
-        return instance_prompts, instance_videos
+        return instance_prompts, instance_videos, instance_trajectories
 
     def _preprocess_data(self):
         try:
@@ -576,43 +538,44 @@ class VideoDataset(Dataset):
         decord.bridge.set_bridge("torch")
 
         videos = []
-        self.tracking_points = []
+        trajectories = []
+        local_trajectories = []
         train_transforms = transforms.Compose(
             [
                 transforms.Lambda(lambda x: x / 255.0 * 2.0 - 1.0),
             ]
         )
 
-        for filename in tqdm(self.instance_video_paths):
+        for filename, trajectory_filename in zip(self.instance_video_paths, self.instance_trajectories):
             video_reader = decord.VideoReader(uri=filename.as_posix(), width=self.width, height=self.height)
+            trajectory = torch.load(trajectory_filename.as_posix())    # (F, N, 2)
+            local_trajectory = torch.load(trajectory_filename.as_posix().replace("trajectories.pth", "local_trajectories.pth")) # (F, N', 2)
+            self.complexity = local_trajectory.size(1)
+
             video_num_frames = len(video_reader)
-
-            tracking = self.instance_data_root.joinpath("tracks.pth")
-            tracking = torch.load(tracking.as_posix())    # (F, N, 2)
-
             start_frame = min(self.skip_frames_start, video_num_frames)
             end_frame = max(0, video_num_frames - self.skip_frames_end)
             if end_frame <= start_frame:
                 frames = video_reader.get_batch([start_frame])
-                tracking = tracking[[start_frame]]
+                trajectory = trajectory[[start_frame]]
             elif end_frame - start_frame <= self.max_num_frames:
                 frames = video_reader.get_batch(list(range(start_frame, end_frame)))
-                tracking = tracking[list(range(start_frame, end_frame))]
+                trajectory = trajectory[list(range(start_frame, end_frame))]
             else:
                 indices = list(range(start_frame, end_frame, (end_frame - start_frame) // self.max_num_frames))
                 frames = video_reader.get_batch(indices)
-                tracking = tracking[indices]
+                trajectory = trajectory[indices]
 
             # Ensure that we don't go over the limit
             frames = frames[: self.max_num_frames]
-            tracking = tracking[: self.max_num_frames]
+            trajectory = trajectory[: self.max_num_frames]
             selected_num_frames = frames.shape[0]
 
             # Choose first (4k + 1) frames as this is how many is required by the VAE
             remainder = (3 + (selected_num_frames % 4)) % 4
             if remainder != 0:
                 frames = frames[:-remainder]
-                tracking = tracking[:-remainder]
+                trajectory = trajectory[:-remainder]
             selected_num_frames = frames.shape[0]
 
             assert (selected_num_frames - 1) % 4 == 0
@@ -621,9 +584,11 @@ class VideoDataset(Dataset):
             frames = frames.float()
             frames = torch.stack([train_transforms(frame) for frame in frames], dim=0)
             videos.append(frames.permute(0, 3, 1, 2).contiguous())  # frames.shape: [F, C, H, W]
-            self.tracking_points.append(tracking)
 
-        return videos
+            trajectories.append(trajectory)
+            local_trajectories.append(local_trajectory)
+
+        return videos, trajectories, local_trajectories
 
 
 def log_validation(
@@ -950,48 +915,22 @@ def main(args):
                 exist_ok=True,
             ).repo_id
 
-    # Prepare models and scheduler
-    tokenizer = AutoTokenizer.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="tokenizer", revision=args.revision
+    # Dataset and DataLoader
+    train_dataset = VideoDataset(
+        instance_data_root=args.instance_data_root,
+        dataset_name=args.dataset_name,
+        dataset_config_name=args.dataset_config_name,
+        caption_column=args.caption_column,
+        video_column=args.video_column,
+        height=args.height,
+        width=args.width,
+        fps=args.fps,
+        max_num_frames=args.max_num_frames,
+        skip_frames_start=args.skip_frames_start,
+        skip_frames_end=args.skip_frames_end,
+        cache_dir=args.cache_dir,
+        id_token=args.id_token,
     )
-
-    text_encoder = T5EncoderModel.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision
-    )
-
-    # CogVideoX-2b weights are stored in float16
-    # CogVideoX-5b and CogVideoX-5b-I2V weights are stored in bfloat16
-    load_dtype = torch.bfloat16 if "5b" in args.pretrained_model_name_or_path.lower() else torch.float16
-    transformer = CogVideoXTransformer3DModel.from_pretrained(
-        args.pretrained_model_name_or_path,
-        subfolder="transformer",
-        torch_dtype=load_dtype,
-        revision=args.revision,
-        variant=args.variant,
-    )
-
-    vae = AutoencoderKLCogVideoX.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision, variant=args.variant
-    )
-
-    scheduler = CogVideoXDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
-
-    if args.enable_slicing:
-        vae.enable_slicing()
-    if args.enable_tiling:
-        vae.enable_tiling()
-
-    # We only train the additional adapter LoRA layers
-    text_encoder.requires_grad_(False)
-    transformer.requires_grad_(False)
-    vae.requires_grad_(False)
-
-    if args.resume_from_checkpoint and args.resume_from_checkpoint != "":
-        trainable_parameters = inject_and_load_motion_embedding(
-            transformer, train=True, version=args.version, ckpt_path=args.resume_from_checkpoint
-        )
-    else:
-        trainable_parameters = inject_motion_embedding(transformer, train=True, version=args.version)
 
     # For mixed precision training we cast all non-trainable weights (vae, text_encoder and transformer) to half-precision
     # as these weights are only used for inference, keeping weights in full precision is not required.
@@ -1018,6 +957,51 @@ def main(args):
         # due to pytorch#99272, MPS does not yet support bfloat16.
         raise ValueError(
             "Mixed precision training with bfloat16 is not supported on MPS. Please use fp16 (recommended) or fp32 instead."
+        )
+
+    # Prepare models and scheduler
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="tokenizer", revision=args.revision
+    )
+
+    text_encoder = T5EncoderModel.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision
+    )
+
+    vae = AutoencoderKLCogVideoX.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision, variant=args.variant
+    )
+
+    if args.enable_slicing:
+        vae.enable_slicing()
+    if args.enable_tiling:
+        vae.enable_tiling()
+
+    scheduler = CogVideoXDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
+
+    # CogVideoX-2b weights are stored in float16
+    # CogVideoX-5b and CogVideoX-5b-I2V weights are stored in bfloat16
+    load_dtype = torch.bfloat16 if "5b" in args.pretrained_model_name_or_path.lower() else torch.float16
+    transformer = MyCogVideoXTransformer3DModel.from_pretrained(
+        args.pretrained_model_name_or_path,
+        subfolder="transformer",
+        torch_dtype=load_dtype,
+        revision=args.revision,
+        variant=args.variant,
+    )
+
+    # We only train the additional adapter LoRA layers
+    text_encoder.requires_grad_(False)
+    transformer.requires_grad_(False)
+    vae.requires_grad_(False)
+
+    if args.resume_from_checkpoint and args.resume_from_checkpoint != "":
+        trainable_parameters = inject_and_load_motion_embedding(
+            transformer, train=True, version=args.version, ckpt_path=args.resume_from_checkpoint
+        )
+    else:
+        trainable_parameters = inject_motion_embedding(
+            transformer, train=True, version=args.version, complexity=train_dataset.complexity
         )
 
     text_encoder.to(accelerator.device, dtype=weight_dtype)
@@ -1065,6 +1049,44 @@ def main(args):
     accelerator.register_save_state_pre_hook(save_model_hook)
     accelerator.register_load_state_pre_hook(load_model_hook)
 
+    def encode_video(video):
+        video = video.to(accelerator.device, dtype=vae.dtype).unsqueeze(0)  # [1, F, C, H, W]
+        video = video.permute(0, 2, 1, 3, 4)  # [1, C, F, H, W]
+        latent_dist = vae.encode(video).latent_dist
+        return latent_dist
+
+    train_dataset.instance_videos = [encode_video(video) for video in train_dataset.instance_videos]
+
+    def collate_fn(examples):
+        videos = [example["instance_video"].sample() * vae.config.scaling_factor for example in examples]
+        prompts = [example["instance_prompt"] for example in examples]
+        trajectories = [example["instance_trajectory"] for example in examples]
+        local_trajectories = [example["instance_local_trajectory"] for example in examples]
+
+        videos = torch.cat(videos)
+        videos = videos.to(memory_format=torch.contiguous_format).float()
+
+        trajectories = torch.stack(trajectories)    # [B, T, N, 2]
+        trajectories = trajectories.to(memory_format=torch.contiguous_format).float()
+
+        local_trajectories = torch.stack(local_trajectories)
+        local_trajectories = local_trajectories.to(memory_format=torch.contiguous_format).float()
+
+        return {
+            "videos": videos,
+            "prompts": prompts,
+            "trajectories": trajectories,
+            "local_trajectories": local_trajectories,
+        }
+
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=args.train_batch_size,
+        shuffle=True,
+        collate_fn=collate_fn,
+        num_workers=args.dataloader_num_workers,
+    )
+
     # Enable TF32 for faster training on Ampere GPUs,
     # cf https://pytorch.org/docs/stable/notes/cuda.html#tensorfloat-32-tf32-on-ampere-devices
     if args.allow_tf32 and torch.cuda.is_available():
@@ -1097,56 +1119,6 @@ def main(args):
     )
 
     optimizer = get_optimizer(args, params_to_optimize, use_deepspeed=use_deepspeed_optimizer)
-
-    # Dataset and DataLoader
-    train_dataset = VideoDataset(
-        instance_data_root=args.instance_data_root,
-        dataset_name=args.dataset_name,
-        dataset_config_name=args.dataset_config_name,
-        caption_column=args.caption_column,
-        video_column=args.video_column,
-        height=args.height,
-        width=args.width,
-        fps=args.fps,
-        max_num_frames=args.max_num_frames,
-        skip_frames_start=args.skip_frames_start,
-        skip_frames_end=args.skip_frames_end,
-        cache_dir=args.cache_dir,
-        id_token=args.id_token,
-    )
-
-    def encode_video(video):
-        video = video.to(accelerator.device, dtype=vae.dtype).unsqueeze(0)  # [1, F, C, H, W]
-        video = video.permute(0, 2, 1, 3, 4)  # [1, C, F, H, W]
-        latent_dist = vae.encode(video).latent_dist
-        return latent_dist
-
-    train_dataset.instance_videos = [encode_video(video) for video in train_dataset.instance_videos]
-
-    def collate_fn(examples):
-        videos = [example["instance_video"].sample() * vae.config.scaling_factor for example in examples]
-        prompts = [example["instance_prompt"] for example in examples]
-        tracks = [example["instance_track"] for example in examples]
-
-        videos = torch.cat(videos)
-        videos = videos.to(memory_format=torch.contiguous_format).float()
-
-        tracks = torch.stack(tracks)    # [B, T, N, 2]
-        tracks = tracks.to(memory_format=torch.contiguous_format).float()
-
-        return {
-            "videos": videos,
-            "prompts": prompts,
-            "tracks": tracks,
-        }
-
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size=args.train_batch_size,
-        shuffle=True,
-        collate_fn=collate_fn,
-        num_workers=args.dataloader_num_workers,
-    )
 
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
@@ -1229,6 +1201,8 @@ def main(args):
 
             with accelerator.accumulate(models_to_accumulate):
                 model_input = batch["videos"].permute(0, 2, 1, 3, 4).to(dtype=weight_dtype)  # [B, F, C, H, W]
+                trajectories = batch["trajectories"].to(accelerator.device) # [B, F, N, 2]
+                local_trajectories = batch["local_trajectories"].to(accelerator.device) # [B, F, N', 2]
                 prompts = batch["prompts"]
 
                 # encode prompts
@@ -1271,12 +1245,19 @@ def main(args):
                 # (this is the forward diffusion process)
                 noisy_model_input = scheduler.add_noise(model_input, noise, timesteps)
 
+                frame_ids = torch.linspace(0, local_trajectories.size(1) - 1, num_frames).to(torch.int32)
+                local_trajectories = local_trajectories[:, frame_ids]
+                motion_module_kwargs = {
+                    "local_trajectories": local_trajectories
+                }
+
                 # Predict the noise residual
                 model_output = transformer(
                     hidden_states=noisy_model_input,    # [B, F, C, H, W]
                     encoder_hidden_states=prompt_embeds,
                     timestep=timesteps,
                     image_rotary_emb=image_rotary_emb,
+                    motion_module_kwargs=motion_module_kwargs,
                     return_dict=False,
                 )[0]
                 model_pred = scheduler.get_velocity(model_output, noisy_model_input, timesteps) # [B, F, C, H, W]
@@ -1293,25 +1274,24 @@ def main(args):
 
                 if timesteps <= 400:
                     if args.tracking_loss:
-                        tracking_points = batch["tracks"].to(accelerator.device)    # [B, F, N, 2]
-                        frame_ids = torch.linspace(0, tracking_points.size(1) - 1, num_frames).to(torch.int32)
-                        tracking_points = tracking_points[:, frame_ids]
-                        batch_size, _, num_trajectories, _ = tracking_points.shape
+                        frame_ids = torch.linspace(0, trajectories.size(1) - 1, num_frames).to(torch.int32)
+                        trajectories = trajectories[:, frame_ids]
+                        batch_size, _, num_trajectories, _ = trajectories.shape
                         model_pred_ = model_pred.permute(0, 1, 3, 4, 2)  # [B, F, H, W, C]
                         batch_ids = torch.arange(batch_size)[:, None, None].repeat(1, num_trajectories, num_frames).to(accelerator.device)
                         frame_ids = torch.arange(num_frames)[None, None, :].repeat(batch_size, num_trajectories, 1).to(accelerator.device)
-                        h_coor = tracking_points[:, :, :, 1].transpose(1, 2).to(accelerator.device) * height
-                        w_coor = tracking_points[:, :, :, 0].transpose(1, 2).to(accelerator.device) * width
+                        h_coor = trajectories[:, :, :, 1].transpose(1, 2).to(accelerator.device) * height
+                        w_coor = trajectories[:, :, :, 0].transpose(1, 2).to(accelerator.device) * width
                         h_coor = h_coor.to(torch.int32).clamp(0, height - 1)
                         w_coor = w_coor.to(torch.int32).clamp(0, width - 1)
 
                         # [B, N, F, C]
                         trajectory_embeddings = model_pred_[batch_ids, frame_ids, h_coor, w_coor]
-                        tracking_loss = torch.mean(
+                        tracker_loss = torch.mean(
                             ((trajectory_embeddings[:, :, 1:] - trajectory_embeddings[:, :, :-1]) ** 2).reshape(batch_size, -1), dim=1
                         )
-                        tracking_loss = tracking_loss.mean()
-                        loss = loss + args.tracking_loss_weight * tracking_loss
+                        tracker_loss = tracker_loss.mean()
+                        loss = loss + args.tracking_loss_weight * tracker_loss
                         del model_pred_
 
                     if args.high_frequency_loss:

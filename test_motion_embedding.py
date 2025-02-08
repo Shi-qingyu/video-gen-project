@@ -8,11 +8,20 @@ from src.motion_embedding import inject_and_load_motion_embedding
 from src.pipeline import MyCogVideoXPipeline
 from src.transformer import MyCogVideoXTransformer3DModel
 
-prompt = "A robot is dancing hip-hop in the desert."
+prompt = "A tiger is walking in the ocean."
 seed = 42
-device = "cuda:1"
-ckpt_path = "checkpoints/lr_1e-3_spatial_temporal_w_tl_0.1_hfl_0.1_breakdance-flare/checkpoint-500/motion_embedding.pth"
+device = "cuda:2"
+ckpt_path = "checkpoints/lr_1e-3_spatial_temporal_bear/checkpoint-300/motion_embedding.pth"
+
+case = ckpt_path.split("/")[1].split("_")[-1]
+traj_path = f"data/{case}/local_trajectories.pth"
 config = "_".join(ckpt_path.split("/")[1: 3])
+
+local_trajectories = torch.load(traj_path)[:49].to(device)
+frame_ids = torch.linspace(0, local_trajectories.size(1) - 1, 13).to(torch.int32)
+local_trajectories = local_trajectories[frame_ids]
+complexity = local_trajectories.size(1)
+local_trajectories = local_trajectories[None]
 
 pipe = MyCogVideoXPipeline.from_pretrained(
     "THUDM/CogVideoX-5b",
@@ -32,6 +41,7 @@ inject_and_load_motion_embedding(
     ckpt_path=ckpt_path,
     version="spatial_temporal",
     train=True,
+    complexity=complexity
 )
 
 pipe.transformer = transformer
@@ -44,6 +54,7 @@ video = pipe(
     num_inference_steps=50,
     num_frames=49,
     guidance_scale=6,
+    local_trajectories=local_trajectories,
     generator=torch.Generator(device=device).manual_seed(seed),
 ).frames[0]
 

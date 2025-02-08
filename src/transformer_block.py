@@ -105,7 +105,7 @@ class MyCogVideoXBlock(nn.Module):
         return hidden_states, encoder_hidden_states
 
 
-class MyCogVideoXLayerNormZero(nn.Module):
+class MyRegionCogVideoXLayerNormZero(nn.Module):
     def __init__(
         self,
         conditioning_dim: int,
@@ -154,7 +154,7 @@ class MyRegionCogVideoXBlock(nn.Module):
         super().__init__()
 
         # 1. Self Attention
-        self.norm1 = MyCogVideoXLayerNormZero(time_embed_dim, dim, norm_elementwise_affine, norm_eps, bias=True)
+        self.norm1 = MyRegionCogVideoXLayerNormZero(time_embed_dim, dim, norm_elementwise_affine, norm_eps, bias=True)
 
         self.attn1 = Attention(
             query_dim=dim,
@@ -168,7 +168,7 @@ class MyRegionCogVideoXBlock(nn.Module):
         )
 
         # 2. Feed Forward
-        self.norm2 = MyCogVideoXLayerNormZero(time_embed_dim, dim, norm_elementwise_affine, norm_eps, bias=True)
+        self.norm2 = MyRegionCogVideoXLayerNormZero(time_embed_dim, dim, norm_elementwise_affine, norm_eps, bias=True)
 
         self.ff = FeedForward(
             dim,

@@ -20,6 +20,7 @@ class MyCogVideoXPipeline(CogVideoXPipeline):
     def __call__(
         self,
         prompt: Optional[Union[str, List[str]]] = None,
+        local_trajectories: torch.Tensor = None,
         negative_prompt: Optional[Union[str, List[str]]] = None,
         words: List[str] = None,
         frame_idx_as_query: int = 0,
@@ -87,6 +88,8 @@ class MyCogVideoXPipeline(CogVideoXPipeline):
             }
         else:
             attention_kwargs = {}
+        
+        motion_module_kwargs = {"local_trajectories": local_trajectories}
 
         # 2. Default call parameters
         if prompt is not None and isinstance(prompt, str):
@@ -161,7 +164,6 @@ class MyCogVideoXPipeline(CogVideoXPipeline):
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latent_model_input.shape[0])
 
-                attention_kwargs["timestep"] = i
                 # predict noise model_output
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
@@ -169,6 +171,7 @@ class MyCogVideoXPipeline(CogVideoXPipeline):
                     timestep=timestep,
                     image_rotary_emb=image_rotary_emb,
                     attention_kwargs=attention_kwargs,
+                    motion_module_kwargs=motion_module_kwargs,
                     return_dict=False,
                 )[0]
                 noise_pred = noise_pred.float()

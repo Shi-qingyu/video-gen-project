@@ -325,4 +325,16 @@ def video2video_with_high_frequency_filter(pretrained_model_name_or_path, video_
 
 
 if __name__ == "__main__":
-    video_to_grid("outputs/A_robot_is_dancing_hip-hop_on_the_floor/lr_1e-3_spatial_temporal_w_tl_0.1_breakdance-flare_checkpoint-500_42.mp4", nframe=4, nrow=4)
+    video_src = Path("./cache/DAVIS/Videos")
+    src = Path("./cache/DAVIS/Trajectories")
+    tgt = Path("./data")
+
+    for src_dir in src.iterdir():
+        src_dir_name = src_dir.stem
+        tgt_dir = tgt.joinpath(src_dir_name)
+        if not tgt_dir.exists():
+            tgt_dir.mkdir(exist_ok=True)
+            video_dir = tgt_dir.joinpath("videos")
+            video_dir.mkdir(exist_ok=True)
+
+            
