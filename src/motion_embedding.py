@@ -1,3 +1,5 @@
+import math
+
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -99,7 +101,7 @@ class SpatialTemporalEmbedding(nn.Module):
         return hidden_states + emb[None]
 
 
-class AdaptiveTemporalEmbedding(nn.Module):
+class AdaptiveSpatialTemporalEmbedding(nn.Module):
     def __init__(self, height, width, frames, dim, complexity=8) -> None:
         super().__init__()
         self.height = height
@@ -107,28 +109,38 @@ class AdaptiveTemporalEmbedding(nn.Module):
         self.frames = frames
         self.dim = dim
 
-        self.motion_emb = nn.Parameter(torch.zeros(size=(complexity, frames, dim)))
+        size = round(math.sqrt(complexity))
+        self.motion_emb = nn.Parameter(torch.zeros(size=(size, size, dim)))
+        self.global_emb = nn.Parameter(torch.zeros(size=(frames, dim)))
     
-    def forward(self, hidden_states: torch.Tensor, train: bool, local_trajectories: torch.Tensor, **kwargs):
+    def forward(self, hidden_states: torch.Tensor, train: bool, masks: torch.Tensor, **kwargs):
         batch_size, seq_len, dim = hidden_states.shape
         hidden_states = hidden_states.reshape(batch_size, self.frames, self.height, self.width, -1)
 
-        # local_trajectories: [B, F, N, 2]
-        batch_size, frames, N, _ = local_trajectories.shape
-        local_trajectories = local_trajectories.transpose(1, 2) # [B, N, F, 2]
+        global_emb = self.global_emb.reshape(self.frames, 1, 1, -1)[None]
+        global_emb = global_emb.repeat(1, 1, self.height, self.width, 1).to(dtype=hidden_states.dtype, device=hidden_states.device)
+        hidden_states = hidden_states + global_emb
 
-        batch_ids = torch.arange(batch_size)[:, None, None].repeat(1, N, frames).to(hidden_states.device)
-        frame_ids = torch.arange(frames)[None, None, :].repeat(batch_size, N, 1).to(hidden_states.device)
-        w_coor = local_trajectories[:, :, :, 0] * self.width
-        w_coor = w_coor.to(torch.int32).clamp(0, self.width - 1)
-        h_coor = local_trajectories[:, :, :, 1] * self.height
-        h_coor = h_coor.to(torch.int32).clamp(0, self.height - 1)
+        batch_size, _, h, w = masks.shape
+        masks = masks.reshape(-1, 1, h, w)
+        masks = F.interpolate(masks, size=(self.height, self.width), mode="nearest")
+        masks = masks.reshape(batch_size, -1, self.height, self.width)
+        # bbox: [B, F, 4]
+        bbox = mask2bbox(mask=masks)
+        motion_emb = self.motion_emb[None].repeat(batch_size, 1, 1, 1)
 
-        motion_emb = self.motion_emb
-        motion_emb = motion_emb[None].to(dtype=hidden_states.dtype, device=hidden_states.device)
-        hidden_states[batch_ids, frame_ids, h_coor, w_coor] = hidden_states[batch_ids, frame_ids, h_coor, w_coor] + motion_emb
+        for b in range(motion_emb.shape[0]):
+            for f in range(motion_emb.shape[1]):
+                bbox_t = bbox[b, f] # [top_left_y, top_left_x, bottom_right_y, bottom_right_x]
+                motion_emb_t = motion_emb[b] # [complexity, complexity, dim]
+                motion_emb_t = motion_emb_t.permute(2, 0, 1)[None]
+                motion_emb_t = F.interpolate(
+                    motion_emb_t, size=(bbox_t[2] - bbox_t[0], bbox_t[3] - bbox_t[1]), mode="bilinear", align_corners=True
+                )[0]
+                motion_emb_t = motion_emb_t.permute(1, 2, 0)
+                hidden_states[b, f, bbox_t[0]: bbox_t[2], bbox_t[1]: bbox_t[3]] = hidden_states[b, f, bbox_t[0]: bbox_t[2], bbox_t[1]: bbox_t[3]] + motion_emb_t
+
         hidden_states = hidden_states.flatten(1, 3)
-
         return hidden_states
 
 
@@ -140,12 +152,22 @@ class AdaptiveMaskTemporalEmbedding(nn.Module):
         self.frames = frames
         self.dim = dim
 
-        self.motion_emb = nn.Parameter(torch.zeros(size=(frames, complexity, complexity, dim)))
+        size = round(math.sqrt(complexity))
+        self.motion_emb = nn.Parameter(torch.zeros(size=(frames, size, size, dim)))
+        self.global_emb = nn.Parameter(torch.zeros(size=(frames, dim)))
     
     def forward(self, hidden_states: torch.Tensor, train: bool, masks: torch.Tensor, **kwargs):
         batch_size, seq_len, dim = hidden_states.shape
         hidden_states = hidden_states.reshape(batch_size, self.frames, self.height, self.width, -1)
 
+        global_emb = self.global_emb.reshape(self.frames, 1, 1, -1)[None]
+        global_emb = global_emb.repeat(1, 1, self.height, self.width, 1).to(dtype=hidden_states.dtype, device=hidden_states.device)
+        hidden_states = hidden_states + global_emb
+        
+        batch_size, _, h, w = masks.shape
+        masks = masks.reshape(-1, 1, h, w)
+        masks = F.interpolate(masks, size=(self.height, self.width), mode="nearest")
+        masks = masks.reshape(batch_size, -1, self.height, self.width)
         # bbox: [B, F, 4]
         bbox = mask2bbox(mask=masks)
         motion_emb = self.motion_emb[None].repeat(batch_size, 1, 1, 1, 1)
@@ -159,7 +181,7 @@ class AdaptiveMaskTemporalEmbedding(nn.Module):
                     motion_emb_t, size=(bbox_t[2] - bbox_t[0], bbox_t[3] - bbox_t[1]), mode="bilinear", align_corners=True
                 )[0]
                 motion_emb_t = motion_emb_t.permute(1, 2, 0)
-                hidden_states[b, f, bbox_t[0]: bbox_t[2], bbox_t[1]: bbox_t[3]] += motion_emb_t
+                hidden_states[b, f, bbox_t[0]: bbox_t[2], bbox_t[1]: bbox_t[3]] = hidden_states[b, f, bbox_t[0]: bbox_t[2], bbox_t[1]: bbox_t[3]] + motion_emb_t
 
         hidden_states = hidden_states.flatten(1, 3)
         return hidden_states
@@ -194,7 +216,8 @@ class ScaleShiftEmbedding(nn.Module):
 def inject_motion_embedding(
     transformer: CogVideoXTransformer3DModel, 
     train=True, 
-    version="", 
+    version="",
+    interpolate_layers=[],
     **kwargs
 ):
     def CogVideoXBlock_forward(
@@ -212,11 +235,12 @@ def inject_motion_embedding(
             hidden_states, encoder_hidden_states, temb
         )
 
-        if motion_module_kwargs is not None:
-            # motion injection
-            norm_hidden_states = self.motion_embedding(norm_hidden_states, train=train, **motion_module_kwargs)
-        else:
-            norm_hidden_states = self.motion_embedding(norm_hidden_states, train=train)
+        if hasattr(self, "motion_embedding"):
+            if motion_module_kwargs is not None:
+                # motion injection
+                norm_hidden_states = self.motion_embedding(norm_hidden_states, train=train, **motion_module_kwargs)
+            else:
+                norm_hidden_states = self.motion_embedding(norm_hidden_states, train=train)
 
         # attention
         attn_hidden_states, attn_encoder_hidden_states = self.attn1(
@@ -251,6 +275,11 @@ def inject_motion_embedding(
     for name, module in transformer.named_modules():
         if module.__class__.__name__ == "CogVideoXBlock" or module.__class__.__name__ == "MyCogVideoXBlock":
             module.forward = CogVideoXBlock_forward.__get__(module, CogVideoXBlock)
+
+            layer_index = int(name.split(".")[1])
+            if len(interpolate_layers) > 0 and layer_index not in interpolate_layers:
+                continue
+            
             if version == "spatial":
                 motion_embedding = SpatialEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
             elif version == "temporal":
@@ -259,10 +288,10 @@ def inject_motion_embedding(
                 motion_embedding = SpatialTemporalEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
             elif version == "scale_shift":
                 motion_embedding = ScaleShiftEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
-            elif version == "adaptive_temporal":
+            elif version == "adaptive_spatial_temporal":
                 complexity = kwargs.get("complexity", None)
                 assert complexity is not None, "complexity can't be None in adaptive temporal version!"
-                motion_embedding = AdaptiveTemporalEmbedding(height=height, width=width, frames=frames, dim=dim, complexity=complexity)
+                motion_embedding = AdaptiveSpatialTemporalEmbedding(height=height, width=width, frames=frames, dim=dim, complexity=complexity)
             elif version == "adaptive_mask_temporal":
                 complexity = kwargs.get("complexity", None)
                 assert complexity is not None, "complexity can't be None in adaptive mask temporal version!"

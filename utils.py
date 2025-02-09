@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import imageio
 import json
+from PIL import Image
 
 from typing import Optional
 
@@ -321,20 +322,57 @@ def video2video_with_high_frequency_filter(pretrained_model_name_or_path, video_
         export_to_video(video, output_video_path=output_video_path, fps=8)
 
 
+def images_to_video(image_folder, output_video_path, fps=8):
+    images = [f for f in os.listdir(image_folder) if f.endswith(('.png', '.jpg', '.jpeg'))]
+    images.sort()
+
+    if len(images) == 0:
+        print("No images found in the folder.")
+        return
+
+    with imageio.get_writer(output_video_path, fps=fps) as writer:
+        for image_name in images:
+            image_path = os.path.join(image_folder, image_name)
+            image = imageio.imread(image_path)
+            writer.append_data(image)
+
+    print(f"Video saved at {output_video_path}")
 
 
+def read_mask_from_dir(image_folder, target_shape):
+    """
+    Args:
+        image_folder (str)
+        target_shape (tuple): (height, width)。
+    
+    Returns:
+        torch.Tensor: [F, H, W]
+    """
+    images = [f for f in os.listdir(image_folder) if f.endswith(('.png', '.jpg', '.jpeg'))]
+    images.sort()
+
+    if len(images) == 0:
+        print("No images found in the folder.")
+        return None
+
+    target_height, target_width = target_shape
+
+    masks = []
+
+    for image_name in images:
+        image_path = os.path.join(image_folder, image_name)
+        mask = Image.open(image_path)
+
+        mask_resized = mask.resize((target_width, target_height), Image.NEAREST)
+
+        mask_array = np.array(mask_resized)
+
+        masks.append(mask_array)
+
+    masks_tensor = torch.tensor(masks)
+
+    return masks_tensor
 
 if __name__ == "__main__":
-    video_src = Path("./cache/DAVIS/Videos")
-    src = Path("./cache/DAVIS/Trajectories")
-    tgt = Path("./data")
-
-    for src_dir in src.iterdir():
-        src_dir_name = src_dir.stem
-        tgt_dir = tgt.joinpath(src_dir_name)
-        if not tgt_dir.exists():
-            tgt_dir.mkdir(exist_ok=True)
-            video_dir = tgt_dir.joinpath("videos")
-            video_dir.mkdir(exist_ok=True)
-
+    print(read_mask_from_dir("cache/DAVIS/Annotations/bear", (480, 720)).shape)
             

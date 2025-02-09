@@ -21,6 +21,7 @@ class MyCogVideoXPipeline(CogVideoXPipeline):
         self,
         prompt: Optional[Union[str, List[str]]] = None,
         local_trajectories: torch.Tensor = None,
+        masks: torch.Tensor = None,
         negative_prompt: Optional[Union[str, List[str]]] = None,
         words: List[str] = None,
         frame_idx_as_query: int = 0,
@@ -89,7 +90,7 @@ class MyCogVideoXPipeline(CogVideoXPipeline):
         else:
             attention_kwargs = {}
         
-        motion_module_kwargs = {"local_trajectories": local_trajectories}
+        motion_module_kwargs = {"local_trajectories": local_trajectories, "masks": masks}
 
         # 2. Default call parameters
         if prompt is not None and isinstance(prompt, str):

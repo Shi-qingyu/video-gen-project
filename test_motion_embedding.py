@@ -8,20 +8,29 @@ from src.motion_embedding import inject_and_load_motion_embedding
 from src.pipeline import MyCogVideoXPipeline
 from src.transformer import MyCogVideoXTransformer3DModel
 
+from utils import read_mask_from_dir
+
 prompt = "A tiger is walking in the ocean."
 seed = 42
-device = "cuda:2"
-ckpt_path = "checkpoints/lr_1e-3_spatial_temporal_bear/checkpoint-300/motion_embedding.pth"
+device = "cuda:1"
+ckpt_path = "checkpoints/lr_1e-3_spatial_temporal_21-42_tl_0.1_mse_1.0_bear/checkpoint-300/motion_embedding.pth"
 
 case = ckpt_path.split("/")[1].split("_")[-1]
+version = "spatial_temporal"
+
 traj_path = f"data/{case}/local_trajectories.pth"
+mask_dir = f"data/{case}/masks"
+
+masks = read_mask_from_dir(mask_dir, target_shape=(480, 720))
 config = "_".join(ckpt_path.split("/")[1: 3])
 
 local_trajectories = torch.load(traj_path)[:49].to(device)
+masks = masks[:49].to(device)
 frame_ids = torch.linspace(0, local_trajectories.size(1) - 1, 13).to(torch.int32)
 local_trajectories = local_trajectories[frame_ids]
 complexity = local_trajectories.size(1)
 local_trajectories = local_trajectories[None]
+masks = masks[frame_ids][None]
 
 pipe = MyCogVideoXPipeline.from_pretrained(
     "THUDM/CogVideoX-5b",
@@ -39,8 +48,9 @@ transformer = MyCogVideoXTransformer3DModel.from_pretrained(
 inject_and_load_motion_embedding(
     transformer,
     ckpt_path=ckpt_path,
-    version="spatial_temporal",
+    version=version,
     train=True,
+    interpolate_layers=list(range(21, 42)),
     complexity=complexity
 )
 
@@ -55,6 +65,7 @@ video = pipe(
     num_frames=49,
     guidance_scale=6,
     local_trajectories=local_trajectories,
+    masks=masks,
     generator=torch.Generator(device=device).manual_seed(seed),
 ).frames[0]
 
