@@ -1022,7 +1022,7 @@ def main(args):
         )
     else:
         trainable_parameters = inject_motion_embedding(
-            transformer, train=True, version=args.version, interpolate_layers=list(range(21)), complexity=train_dataset.complexity
+            transformer, train=True, version=args.version, complexity=train_dataset.complexity
         )
 
     text_encoder.to(accelerator.device, dtype=weight_dtype)

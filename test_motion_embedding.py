@@ -12,25 +12,29 @@ from utils import read_mask_from_dir
 
 prompt = "A tiger is walking in the ocean."
 seed = 42
-device = "cuda:1"
-ckpt_path = "checkpoints/lr_1e-3_spatial_temporal_21-42_tl_0.1_mse_1.0_bear/checkpoint-300/motion_embedding.pth"
-
-case = ckpt_path.split("/")[1].split("_")[-1]
-version = "spatial_temporal"
-
-traj_path = f"data/{case}/local_trajectories.pth"
-mask_dir = f"data/{case}/masks"
-
-masks = read_mask_from_dir(mask_dir, target_shape=(480, 720))
+device = "cuda:2"
+ckpt_path = "checkpoints/lr_1e-3_spatial_tl_0.1_mse_1.0_bear/checkpoint-200/motion_embedding.pth"
 config = "_".join(ckpt_path.split("/")[1: 3])
 
-local_trajectories = torch.load(traj_path)[:49].to(device)
-masks = masks[:49].to(device)
-frame_ids = torch.linspace(0, local_trajectories.size(1) - 1, 13).to(torch.int32)
-local_trajectories = local_trajectories[frame_ids]
-complexity = local_trajectories.size(1)
-local_trajectories = local_trajectories[None]
-masks = masks[frame_ids][None]
+case = ckpt_path.split("/")[1].split("_")[-1]
+version = "spatial"
+
+masks = None
+local_trajectories = None
+complexity = None
+
+# traj_path = f"data/{case}/local_trajectories.pth"
+# mask_dir = f"data/{case}/masks"
+
+# masks = read_mask_from_dir(mask_dir, target_shape=(480, 720))
+
+# local_trajectories = torch.load(traj_path)[:49].to(device)
+# masks = masks[:49].to(device)
+# frame_ids = torch.linspace(0, local_trajectories.size(1) - 1, 13).to(torch.int32)
+# local_trajectories = local_trajectories[frame_ids]
+# complexity = local_trajectories.size(1)
+# local_trajectories = local_trajectories[None]
+# masks = masks[frame_ids][None]
 
 pipe = MyCogVideoXPipeline.from_pretrained(
     "THUDM/CogVideoX-5b",
@@ -50,8 +54,8 @@ inject_and_load_motion_embedding(
     ckpt_path=ckpt_path,
     version=version,
     train=True,
-    interpolate_layers=list(range(21, 42)),
-    complexity=complexity
+    interpolate_layers=[],
+    complexity=complexity,
 )
 
 pipe.transformer = transformer

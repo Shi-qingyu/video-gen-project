@@ -1,10 +1,10 @@
 #!/bin/bash
 
-export VERSION="spatial_temporal"
+export VERSION="spatial"
 
 export MODEL_PATH="THUDM/CogVideoX-5b"
 export DATASET_PATH="data/bear"
-export OUTPUT_PATH="checkpoints/lr_1e-3_${VERSION}_0-21_tl_0.1_mse_1.0_bear"
+export OUTPUT_PATH="checkpoints/lr_1e-3_${VERSION}_mse_1.0_bear"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 
@@ -30,8 +30,8 @@ accelerate launch --config_file configs/accelerate_config_machine_single.yaml --
   --skip_frames_start 0 \
   --skip_frames_end 0 \
   --train_batch_size 1 \
-  --max_train_steps 1000 \
-  --checkpointing_steps 200 \
+  --max_train_steps 500 \
+  --checkpointing_steps 100 \
   --resume_from_checkpoint "" \
   --gradient_accumulation_steps 1 \
   --learning_rate 1e-3 \
@@ -39,6 +39,4 @@ accelerate launch --config_file configs/accelerate_config_machine_single.yaml --
   --adam_beta1 0.9 \
   --adam_beta2 0.95 \
   --version $VERSION \
-  --tracking_loss \
-  --tracking_loss_weight 0.1 \
   --mse_weight 1.0

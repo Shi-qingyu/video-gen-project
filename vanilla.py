@@ -15,9 +15,9 @@ from utils import save_tensor_as_images
 
 SEED = 42
 
-prompt = "A tiger is walking in the ocean."
+prompt = "A bear is walking on the stone."
 device = "cuda:2"
-intermediate_layer = 42
+intermediate_layer = 28
 
 
 @dataclass

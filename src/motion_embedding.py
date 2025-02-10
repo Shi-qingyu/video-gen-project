@@ -81,12 +81,7 @@ class SpatialTemporalEmbedding(nn.Module):
 
         motion_emb = self.motion_emb.reshape(self.frames, 1, 1, self.dim).repeat(1, self.height, self.width, 1)
         appearance_emb = self.appearance_emb.reshape(1, self.height, self.width, self.dim).repeat(self.frames, 1, 1, 1)
-
-        if train:
-            emb = motion_emb + appearance_emb
-        else:
-            emb = motion_emb
- 
+        emb = motion_emb + appearance_emb
         emb = emb.flatten(0, 2)
 
         if seq_len <= emb.shape[0]:
@@ -110,38 +105,28 @@ class AdaptiveSpatialTemporalEmbedding(nn.Module):
         self.dim = dim
 
         size = round(math.sqrt(complexity))
-        self.motion_emb = nn.Parameter(torch.zeros(size=(size, size, dim)))
-        self.global_emb = nn.Parameter(torch.zeros(size=(frames, dim)))
+        self.motion_emb = nn.Parameter(torch.zeros(size=(frames, size, size, dim)))
+        self.appearance_emb = nn.Parameter(torch.zeros(size=(height, width, dim)))
     
-    def forward(self, hidden_states: torch.Tensor, train: bool, masks: torch.Tensor, **kwargs):
+    def forward(self, hidden_states: torch.Tensor, train: bool, **kwargs):
         batch_size, seq_len, dim = hidden_states.shape
-        hidden_states = hidden_states.reshape(batch_size, self.frames, self.height, self.width, -1)
 
-        global_emb = self.global_emb.reshape(self.frames, 1, 1, -1)[None]
-        global_emb = global_emb.repeat(1, 1, self.height, self.width, 1).to(dtype=hidden_states.dtype, device=hidden_states.device)
-        hidden_states = hidden_states + global_emb
+        spatial_emb = self.appearance_emb[None].repeat(self.frames, 1, 1, 1)
+        spatial_emb = spatial_emb.flatten(0, 2).to(dtype=hidden_states.dtype, device=hidden_states.device)
+        
+        motion_emb = self.motion_emb.permute(0, 3, 1, 2)
+        motion_emb = F.interpolate(
+            motion_emb, size=(self.height, self.width), mode="bilinear", align_corners=True
+        )
+        motion_emb = motion_emb.permute(0, 2, 3, 1).flatten(0, 2)
 
-        batch_size, _, h, w = masks.shape
-        masks = masks.reshape(-1, 1, h, w)
-        masks = F.interpolate(masks, size=(self.height, self.width), mode="nearest")
-        masks = masks.reshape(batch_size, -1, self.height, self.width)
-        # bbox: [B, F, 4]
-        bbox = mask2bbox(mask=masks)
-        motion_emb = self.motion_emb[None].repeat(batch_size, 1, 1, 1)
-
-        for b in range(motion_emb.shape[0]):
-            for f in range(motion_emb.shape[1]):
-                bbox_t = bbox[b, f] # [top_left_y, top_left_x, bottom_right_y, bottom_right_x]
-                motion_emb_t = motion_emb[b] # [complexity, complexity, dim]
-                motion_emb_t = motion_emb_t.permute(2, 0, 1)[None]
-                motion_emb_t = F.interpolate(
-                    motion_emb_t, size=(bbox_t[2] - bbox_t[0], bbox_t[3] - bbox_t[1]), mode="bilinear", align_corners=True
-                )[0]
-                motion_emb_t = motion_emb_t.permute(1, 2, 0)
-                hidden_states[b, f, bbox_t[0]: bbox_t[2], bbox_t[1]: bbox_t[3]] = hidden_states[b, f, bbox_t[0]: bbox_t[2], bbox_t[1]: bbox_t[3]] + motion_emb_t
-
-        hidden_states = hidden_states.flatten(1, 3)
+        if train:
+            hidden_states = hidden_states + spatial_emb[None] + motion_emb[None]
+        else:
+            hidden_states = hidden_states + motion_emb[None]
+        
         return hidden_states
+
 
 
 class AdaptiveMaskTemporalEmbedding(nn.Module):
@@ -154,15 +139,14 @@ class AdaptiveMaskTemporalEmbedding(nn.Module):
 
         size = round(math.sqrt(complexity))
         self.motion_emb = nn.Parameter(torch.zeros(size=(frames, size, size, dim)))
-        self.global_emb = nn.Parameter(torch.zeros(size=(frames, dim)))
-    
+        self.appearance_emb = nn.Parameter(torch.zeros(size=(height, width, dim)))
+
     def forward(self, hidden_states: torch.Tensor, train: bool, masks: torch.Tensor, **kwargs):
         batch_size, seq_len, dim = hidden_states.shape
         hidden_states = hidden_states.reshape(batch_size, self.frames, self.height, self.width, -1)
 
-        global_emb = self.global_emb.reshape(self.frames, 1, 1, -1)[None]
-        global_emb = global_emb.repeat(1, 1, self.height, self.width, 1).to(dtype=hidden_states.dtype, device=hidden_states.device)
-        hidden_states = hidden_states + global_emb
+        spatial_emb = self.appearance_emb[None].repeat(self.frames, 1, 1, 1)
+        spatial_emb = spatial_emb.flatten(0, 2).to(dtype=hidden_states.dtype, device=hidden_states.device)
         
         batch_size, _, h, w = masks.shape
         masks = masks.reshape(-1, 1, h, w)
@@ -183,7 +167,11 @@ class AdaptiveMaskTemporalEmbedding(nn.Module):
                 motion_emb_t = motion_emb_t.permute(1, 2, 0)
                 hidden_states[b, f, bbox_t[0]: bbox_t[2], bbox_t[1]: bbox_t[3]] = hidden_states[b, f, bbox_t[0]: bbox_t[2], bbox_t[1]: bbox_t[3]] + motion_emb_t
 
-        hidden_states = hidden_states.flatten(1, 3)
+        if train:
+            hidden_states = hidden_states.flatten(1, 3) + spatial_emb[None]
+        else:
+            hidden_states = hidden_states.flatten(1, 3)
+        
         return hidden_states
 
 
