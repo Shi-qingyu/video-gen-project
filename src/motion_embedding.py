@@ -18,6 +18,7 @@ class SpatialEmbedding(nn.Module):
         self.width = width
         self.frames = frames
         self.dim = dim
+
         self.appearance_emb = nn.Parameter(torch.zeros(size=(height, width, dim)))
     
     def forward(self, hidden_states: torch.Tensor, **kwargs):
@@ -34,6 +35,33 @@ class SpatialEmbedding(nn.Module):
         assert spatial_emb.shape == hidden_states[0].shape, f"expect emb.shape = {hidden_states[0].shape} but got {spatial_emb.shape}!"
         
         spatial_emb = spatial_emb.to(dtype=hidden_states.dtype, device=hidden_states.device)
+        return hidden_states + spatial_emb[None]
+
+
+class SpatialEmbeddingWithReLU(nn.Module):
+    def __init__(self, height, width, frames, dim) -> None:
+        super().__init__()
+        self.height = height
+        self.width = width
+        self.frames = frames
+        self.dim = dim
+
+        self.appearance_emb = nn.Parameter(torch.zeros(size=(height, width, dim)))
+    
+    def forward(self, hidden_states: torch.Tensor, **kwargs):
+        batch, seq_len, dim = hidden_states.shape
+
+        spatial_emb = self.appearance_emb[None].repeat(self.frames, 1, 1, 1)
+        spatial_emb = spatial_emb.flatten(0, 2)
+
+        if seq_len <= spatial_emb.shape[0]:
+            spatial_emb = spatial_emb[:seq_len]
+        else:
+            spatial_emb = F.interpolate(spatial_emb.unsqueeze(0), size=(seq_len, dim), mode='linear', align_corners=False).squeeze(0)
+        
+        assert spatial_emb.shape == hidden_states[0].shape, f"expect emb.shape = {hidden_states[0].shape} but got {spatial_emb.shape}!"
+        
+        spatial_emb = F.relu(spatial_emb).to(dtype=hidden_states.dtype, device=hidden_states.device)
         return hidden_states + spatial_emb[None]
 
 
@@ -81,7 +109,10 @@ class SpatialTemporalEmbedding(nn.Module):
 
         motion_emb = self.motion_emb.reshape(self.frames, 1, 1, self.dim).repeat(1, self.height, self.width, 1)
         appearance_emb = self.appearance_emb.reshape(1, self.height, self.width, self.dim).repeat(self.frames, 1, 1, 1)
-        emb = motion_emb + appearance_emb
+        if train:
+            emb = motion_emb + appearance_emb
+        else:
+            emb = appearance_emb
         emb = emb.flatten(0, 2)
 
         if seq_len <= emb.shape[0]:
@@ -118,7 +149,7 @@ class AdaptiveSpatialTemporalEmbedding(nn.Module):
         motion_emb = F.interpolate(
             motion_emb, size=(self.height, self.width), mode="bilinear", align_corners=True
         )
-        motion_emb = motion_emb.permute(0, 2, 3, 1).flatten(0, 2)
+        motion_emb = motion_emb.permute(0, 2, 3, 1).flatten(0, 2).to(dtype=hidden_states.dtype, device=hidden_states.device)
 
         if train:
             hidden_states = hidden_states + spatial_emb[None] + motion_emb[None]
@@ -126,7 +157,6 @@ class AdaptiveSpatialTemporalEmbedding(nn.Module):
             hidden_states = hidden_states + motion_emb[None]
         
         return hidden_states
-
 
 
 class AdaptiveMaskTemporalEmbedding(nn.Module):
@@ -201,6 +231,31 @@ class ScaleShiftEmbedding(nn.Module):
         return hidden_states
     
 
+class MLPEmbedding(nn.Module):
+    def __init__(self, height, width, frames, dim) -> None:
+        super().__init__()
+        self.height = height
+        self.width = width
+        self.frames = frames
+        self.dim = dim
+
+        self.mlp = None
+    
+    def forward(self, hidden_states: torch.Tensor, train=True, **kwargs):
+        batch, seq_len, dim = hidden_states.shape
+
+        scale_emb = self.scale_emb.reshape(self.frames, 1, 1, self.dim).repeat(1, self.height, self.width, 1)
+        scale_emb = scale_emb.flatten(0, 2)[None]
+        shift_emb = self.shift_emb.reshape(1, self.height, self.width, self.dim).repeat(self.frames, 1, 1, 1)
+        shift_emb = shift_emb.flatten(0, 2)[None]
+
+        scale_emb = scale_emb.to(dtype=hidden_states.dtype, device=hidden_states.device)
+        shift_emb = shift_emb.to(dtype=hidden_states.dtype, device=hidden_states.device)
+
+        hidden_states = hidden_states * (1 + scale_emb) + shift_emb
+        return hidden_states
+
+
 def inject_motion_embedding(
     transformer: CogVideoXTransformer3DModel, 
     train=True, 
@@ -268,22 +323,27 @@ def inject_motion_embedding(
             if len(interpolate_layers) > 0 and layer_index not in interpolate_layers:
                 continue
             
-            if version == "spatial":
+            if version == "spatial" or version == "spatial_frozen":
                 motion_embedding = SpatialEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
+            elif version == "spatial_relu":
+                motion_embedding = SpatialEmbeddingWithReLU(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
             elif version == "temporal":
                 motion_embedding = TemporalEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
-            elif version == "spatial_frozen_temporal" or version == "spatial_temporal":
+            elif version == "spatial_frozen_temporal" or version == "temporal_frozen_spatial" or version == "spatial_temporal":
                 motion_embedding = SpatialTemporalEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
+            elif version == "spatial_motion":
+                motion_embedding = SpatialMotionEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
             elif version == "scale_shift":
                 motion_embedding = ScaleShiftEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
             elif version == "adaptive_spatial_temporal":
-                complexity = kwargs.get("complexity", None)
-                assert complexity is not None, "complexity can't be None in adaptive temporal version!"
-                motion_embedding = AdaptiveSpatialTemporalEmbedding(height=height, width=width, frames=frames, dim=dim, complexity=complexity)
+                if layer_index < 21:
+                    motion_embedding = SpatialEmbeddingWithReLU(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
+                else:
+                    motion_embedding = TemporalEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
             elif version == "adaptive_mask_temporal":
                 complexity = kwargs.get("complexity", None)
                 assert complexity is not None, "complexity can't be None in adaptive mask temporal version!"
-                motion_embedding = AdaptiveMaskTemporalEmbedding(height=height, width=width, frames=frames, dim=dim, complexity=complexity)                
+                motion_embedding = AdaptiveMaskTemporalEmbedding(height=height, width=width, frames=frames, dim=dim, complexity=complexity).to(transformer.device)       
             else:
                 raise ValueError(f"Unexpected motion embedding version: {version}")
 
@@ -291,8 +351,12 @@ def inject_motion_embedding(
 
             if train:
                 for name, param in motion_embedding.named_parameters():
-                    if version == "spatial_frozen_temporal":
+                    if version == "spatial_frozen_temporal" or version == "spatial_motion" or version == "spatial_frozen":
                         if "appearance_emb" in name:
+                            param.requires_grad_(False)
+                            continue
+                    elif version == "temporal_frozen_spatial":
+                        if "motion_emb" in name:
                             param.requires_grad_(False)
                             continue
 
@@ -326,7 +390,7 @@ def inject_and_load_motion_embedding(
     )
     ckpt = torch.load(ckpt_path)
     _, unexpected_keys = transformer.load_state_dict(ckpt, strict=False)
-    assert len(unexpected_keys) == 0, f"Something wrong with the checkpoint!"
+    # assert len(unexpected_keys) == 0, f"Something wrong with the checkpoint!"
     print("Loading motion embedding sucessfully!")
     return trainable_parameters
 

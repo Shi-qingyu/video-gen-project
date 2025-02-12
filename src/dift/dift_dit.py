@@ -110,10 +110,6 @@ class OneStepPipeline(CogVideoXPipeline):
         return_layer_ids,
         prompt: Optional[Union[str, List[str]]] = None,
         negative_prompt: Optional[Union[str, List[str]]] = None,
-        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
-        callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
-        callback_steps: int = 1,
-        cross_attention_kwargs: Optional[Dict[str, Any]] = None
     ):
         device = self._execution_device
         latents = self.vae.encode(video_tensor).latent_dist.sample() * self.vae.config.scaling_factor
@@ -170,7 +166,7 @@ class SDFeaturizer:
     def forward(
         self,
         video_tensor,
-        prompt='',
+        prompt="",
         t=261,
         return_layer_ids=1,
         ensemble_size=8

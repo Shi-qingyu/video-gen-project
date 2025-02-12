@@ -47,6 +47,7 @@ from diffusers.utils import check_min_version, convert_unet_state_dict_to_peft, 
 from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_card
 from diffusers.utils.torch_utils import is_compiled_module
 
+from src.motion_embedding import inject_and_load_motion_embedding
 
 if is_wandb_available():
     import wandb
@@ -1011,6 +1012,14 @@ def main(args):
         variant=args.variant,
     )
 
+    # _ = inject_and_load_motion_embedding(
+    #     transformer=transformer, 
+    #     ckpt_path="checkpoints/lr_1e-3_spatial_mse_1.0_breakdance-flare/checkpoint-500/motion_embedding.pth", 
+    #     version="spatial_frozen",
+    #     train=False,
+    # )
+    # assert len(_) == 0, f"motion embedding should be frozen!"
+
     vae = AutoencoderKLCogVideoX.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision, variant=args.variant
     )
@@ -1061,12 +1070,20 @@ def main(args):
     if args.gradient_checkpointing:
         transformer.enable_gradient_checkpointing()
 
+    target_modules = []
+    for i in range(21, 42):
+        to_q = str(i) + ".attn1.to_q"
+        to_k = str(i) + ".attn1.to_k"
+        to_v = str(i) + ".attn1.to_v"
+        to_out = str(i) + ".attn1.to_out.0"
+        target_modules.extend([to_q, to_k, to_v, to_out])
+
     # now we will add new LoRA weights to the attention layers
     transformer_lora_config = LoraConfig(
         r=args.rank,
         lora_alpha=args.lora_alpha,
         init_lora_weights=True,
-        target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+        target_modules=target_modules,
     )
     transformer.add_adapter(transformer_lora_config)
 

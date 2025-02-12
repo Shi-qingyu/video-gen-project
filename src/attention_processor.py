@@ -12,10 +12,14 @@ class CogVideoXAttnProcessor3_0(CogVideoXAttnProcessor2_0):
         super().__init__()
         self.layer_idx = block_idx
         self.attention_store = None
-    
+        
 
     def get_attention_scores(
-        self, attn: Attention, query: torch.Tensor, key: torch.Tensor, attention_mask: Optional[torch.Tensor] = None
+        self, 
+        attn: Attention, 
+        query: torch.Tensor, 
+        key: torch.Tensor, 
+        attention_mask: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         r"""
         Compute the attention scores.

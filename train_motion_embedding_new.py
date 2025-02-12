@@ -47,8 +47,7 @@ from diffusers.utils import check_min_version, convert_unet_state_dict_to_peft, 
 from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_card
 from diffusers.utils.torch_utils import is_compiled_module
 
-from src.motion_embedding import inject_and_load_motion_embedding, inject_motion_embedding, save_motion_embedding
-from src.transformer import MyCogVideoXTransformer3DModel
+from src.new.attention_processor import MyCogVideoXAttnProcessor2_0
 from utils import high_frequency_filter, read_mask_from_dir
 
 if is_wandb_available():
@@ -181,6 +180,18 @@ def get_args():
     # Training information
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
     parser.add_argument(
+        "--rank",
+        type=int,
+        default=128,
+        help=("The dimension of the LoRA update matrices."),
+    )
+    parser.add_argument(
+        "--lora_alpha",
+        type=float,
+        default=128,
+        help=("The scaling factor to scale LoRA weight update. The actual scaling factor is `lora_alpha / rank`"),
+    )
+    parser.add_argument(
         "--mixed_precision",
         type=str,
         default=None,
@@ -277,7 +288,13 @@ def get_args():
         help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",
     )
     parser.add_argument(
-        "--learning_rate",
+        "--learning_rate_emb",
+        type=float,
+        default=1e-3,
+        help="Initial learning rate (after the potential warmup period) to use.",
+    )
+    parser.add_argument(
+        "--learning_rate_lora",
         type=float,
         default=1e-4,
         help="Initial learning rate (after the potential warmup period) to use.",
@@ -1136,7 +1153,7 @@ def main(args):
     # CogVideoX-2b weights are stored in float16
     # CogVideoX-5b and CogVideoX-5b-I2V weights are stored in bfloat16
     load_dtype = torch.bfloat16 if "5b" in args.pretrained_model_name_or_path.lower() else torch.float16
-    transformer = MyCogVideoXTransformer3DModel.from_pretrained(
+    transformer = CogVideoXTransformer3DModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="transformer",
         torch_dtype=load_dtype,
@@ -1149,22 +1166,35 @@ def main(args):
     transformer.requires_grad_(False)
     vae.requires_grad_(False)
 
-    if hasattr(train_dataset, "complexity"):
-        complexity = train_dataset.complexity
-    else:
-        complexity = None
-    if args.resume_from_checkpoint and args.resume_from_checkpoint != "":
-        trainable_parameters = inject_and_load_motion_embedding(
-            transformer, train=True, version=args.version, complexity=complexity, ckpt_path=args.resume_from_checkpoint
-        )
-    else:
-        trainable_parameters = inject_motion_embedding(
-            transformer, train=True, version=args.version, complexity=complexity
-        )
-
     text_encoder.to(accelerator.device, dtype=weight_dtype)
     transformer.to(accelerator.device, dtype=weight_dtype)
     vae.to(accelerator.device, dtype=weight_dtype)
+
+    # now we will add new LoRA weights to the attention layers
+    transformer_lora_config = LoraConfig(
+        r=args.rank,
+        lora_alpha=args.lora_alpha,
+        init_lora_weights=True,
+        target_modules=["to_v", "to_out.0"],
+    )
+    transformer.add_adapter(transformer_lora_config)
+
+    height = transformer.config.sample_height // transformer.config.patch_size
+    width = transformer.config.sample_width // transformer.config.patch_size
+    frames = transformer.config.sample_frames // transformer.config.temporal_compression_ratio + 1
+    dim = transformer.config.num_attention_heads * transformer.config.attention_head_dim
+
+    attn_processors = {}
+    for key, value in transformer.attn_processors.items():
+        attn_processor = MyCogVideoXAttnProcessor2_0(
+            height=height, width=width, frames=frames, dim=dim
+        ).to(accelerator.device, dtype=weight_dtype)
+        for param in attn_processor.parameters():
+            param.requires_grad_(True)
+
+        attn_processors[key] = attn_processor
+
+    transformer.set_attn_processor(attn_processors)
 
     if args.gradient_checkpointing:
         transformer.enable_gradient_checkpointing()
@@ -1180,32 +1210,22 @@ def main(args):
             for model in models:
                 if isinstance(unwrap_model(model), CogVideoXTransformer3DModel):
                     save_path = os.path.join(output_dir, "motion_embedding.pth")
-                    save_motion_embedding(model, save_path)
+                    embedding_state_dict = {}
+                    for name, param in model.state_dict().items():
+                        if "processor" in name:
+                            embedding_state_dict[name] = param
+                    torch.save(embedding_state_dict, save_path)
+
+                    transformer_lora_layers_to_save = get_peft_model_state_dict(model)
+
                 weights.pop()
 
-    def load_model_hook(models, input_dir):
-        transformer_ = None
-
-        while len(models) > 0:
-            model = models.pop()
-
-            if isinstance(model, type(unwrap_model(transformer))):
-                transformer_ = model
-            else:
-                raise ValueError(f"Unexpected save model: {model.__class__}")
-
-        checkpoint = os.path.join(input_dir, "motion_embedding.pth")
-        inject_and_load_motion_embedding(transformer_, checkpoint, version=args.version)
-
-        # Make sure the trainable params are in float32. This is again needed since the base models
-        # are in `weight_dtype`. More details:
-        # https://github.com/huggingface/diffusers/pull/6514#discussion_r1449796804
-        if args.mixed_precision == "fp16":
-            # only upcast trainable parameters (LoRA) into fp32
-            cast_training_params([transformer_])
+            CogVideoXPipeline.save_lora_weights(
+                output_dir,
+                transformer_lora_layers=transformer_lora_layers_to_save,
+            )
 
     accelerator.register_save_state_pre_hook(save_model_hook)
-    accelerator.register_load_state_pre_hook(load_model_hook)
 
     def encode_video(video):
         video = video.to(accelerator.device, dtype=vae.dtype).unsqueeze(0)  # [1, F, C, H, W]
@@ -1219,27 +1239,17 @@ def main(args):
         videos = [example["instance_video"].sample() * vae.config.scaling_factor for example in examples]
         prompts = [example["instance_prompt"] for example in examples]
         trajectories = [example["instance_trajectory"] for example in examples]
-        local_trajectories = [example["instance_local_trajectory"] for example in examples]
-        video_masks = [example["instance_video_mask"] for example in examples]
 
         videos = torch.cat(videos)
         videos = videos.to(memory_format=torch.contiguous_format).float()
 
-        masks = torch.stack(video_masks, dim=0)
-        masks = masks.to(memory_format=torch.contiguous_format)
-
         trajectories = torch.stack(trajectories)    # [B, T, N, 2]
         trajectories = trajectories.to(memory_format=torch.contiguous_format).float()
 
-        local_trajectories = torch.stack(local_trajectories)
-        local_trajectories = local_trajectories.to(memory_format=torch.contiguous_format).float()
-
         return {
             "videos": videos,
-            "masks": masks,
             "prompts": prompts,
             "trajectories": trajectories,
-            "local_trajectories": local_trajectories,
         }
 
     def simple_collate_fn(examples):
@@ -1280,12 +1290,19 @@ def main(args):
         # only upcast trainable parameters (LoRA) into fp32
         cast_training_params([transformer], dtype=torch.float32)
 
-    transformer_motion_embedding_parameters = list(filter(lambda p: p.requires_grad, transformer.parameters()))
-    assert len(transformer_motion_embedding_parameters) == len(trainable_parameters)
+    transformer_motion_embedding_parameters = []
+    lora_parameters = []
+    for name, param in transformer.named_parameters():
+        if "processor" in name and param.requires_grad:
+            transformer_motion_embedding_parameters.append(param)
+        elif param.requires_grad:
+            lora_parameters.append(param)
+    assert len(transformer_motion_embedding_parameters) > 0 and len(lora_parameters) > 0
 
     # Optimization parameters
-    transformer_parameters_with_lr = {"params": transformer_motion_embedding_parameters, "lr": args.learning_rate}
-    params_to_optimize = [transformer_parameters_with_lr]
+    transformer_parameters_with_lr = {"params": transformer_motion_embedding_parameters, "lr": args.learning_rate_emb}
+    lora_parameters_with_lr = {"params": lora_parameters, "lr": args.learning_rate_lora}
+    params_to_optimize = [transformer_parameters_with_lr, lora_parameters_with_lr]
 
     use_deepspeed_optimizer = (
         accelerator.state.deepspeed_plugin is not None
@@ -1424,22 +1441,12 @@ def main(args):
                 # (this is the forward diffusion process)
                 noisy_model_input = scheduler.add_noise(model_input, noise, timesteps)
 
-                # frame_ids = torch.linspace(0, local_trajectories.size(1) - 1, num_frames).to(torch.int32)
-                # local_trajectories = local_trajectories[:, frame_ids]
-                # masks = masks[:, frame_ids]
-                # motion_module_kwargs = {
-                #     "local_trajectories": local_trajectories,
-                #     "masks": masks,
-                # }
-                motion_module_kwargs = {}
-
                 # Predict the noise residual
                 model_output = transformer(
                     hidden_states=noisy_model_input,    # [B, F, C, H, W]
                     encoder_hidden_states=prompt_embeds,
                     timestep=timesteps,
                     image_rotary_emb=image_rotary_emb,
-                    motion_module_kwargs=motion_module_kwargs,
                     return_dict=False,
                 )[0]
                 model_pred = scheduler.get_velocity(model_output, noisy_model_input, timesteps) # [B, F, C, H, W]

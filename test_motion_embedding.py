@@ -10,18 +10,18 @@ from src.transformer import MyCogVideoXTransformer3DModel
 
 from utils import read_mask_from_dir
 
-prompt = "A tiger is walking in the ocean."
+prompt = "A robot is dancing on the grassland."
 seed = 42
 device = "cuda:2"
-ckpt_path = "checkpoints/lr_1e-3_spatial_tl_0.1_mse_1.0_bear/checkpoint-200/motion_embedding.pth"
-config = "_".join(ckpt_path.split("/")[1: 3])
+ckpt_path = "checkpoints/lr_1e-3_adaptive_spatial_temporal_bg_mse_1.0_dance-twirl/checkpoint-500/motion_embedding.pth"
+version = "adaptive_spatial_temporal"
 
+config = "_".join(ckpt_path.split("/")[1: 3])
 case = ckpt_path.split("/")[1].split("_")[-1]
-version = "spatial"
 
 masks = None
 local_trajectories = None
-complexity = None
+complexity = 8
 
 # traj_path = f"data/{case}/local_trajectories.pth"
 # mask_dir = f"data/{case}/masks"
@@ -54,7 +54,7 @@ inject_and_load_motion_embedding(
     ckpt_path=ckpt_path,
     version=version,
     train=True,
-    interpolate_layers=[],
+    interpolate_layers=list(range(42)),
     complexity=complexity,
 )
 

@@ -374,5 +374,5 @@ def read_mask_from_dir(image_folder, target_shape):
     return masks_tensor
 
 if __name__ == "__main__":
-    print(read_mask_from_dir("cache/DAVIS/Annotations/bear", (480, 720)).shape)
+    video_to_frames("data/dog-agility/videos/dog-agility.mp4")
             

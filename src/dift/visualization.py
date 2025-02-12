@@ -6,7 +6,6 @@ import numpy as np
 import torch.nn.functional as F
 
 class Demo:
-
     def __init__(self, imgs, ft, img_size):
         self.ft = ft # N+1, C, H, W
         self.imgs = imgs
