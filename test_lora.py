@@ -56,7 +56,7 @@ pipe.vae.enable_slicing()
 pipe.vae.enable_tiling()
 
 # Load LoRA weights
-lora_weight_path = "results/r_128_lr_1e-4_21-42_dance-twirl/pytorch_lora_weights.safetensors"
+lora_weight_path = "results/r_128_lr_1e-4_kv_dance-twirl/checkpoint-500/pytorch_lora_weights.safetensors"
 config = "_".join(lora_weight_path.split("/")[1:3])
 lora_scaling = 128 / 128
 pipe.load_lora_weights(lora_weight_path, adapter_name="cogvideox-lora")
@@ -64,7 +64,7 @@ pipe.set_adapters(["cogvideox-lora"], [lora_scaling])
 
 # Run inference
 validation_outputs = []
-validation_prompt = "A woman wearing blue dress is dancing on the ground in front of a lot of person."
+validation_prompt = "An astronaut is dancing on mars."
 
 save_path = Path(validation_prompt.split(".")[0].replace(" ", "_"))
 save_path.mkdir(exist_ok=True)

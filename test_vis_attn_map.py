@@ -3,6 +3,8 @@ from src.transformer import VisAttnMapCogVideoXTransformer3DModel
 from src.attention_store import AttentionStore
 
 import os
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 import torch
 import torch.nn.functional as F
@@ -14,14 +16,14 @@ from diffusers.utils import export_to_video
 from diffusers import AutoencoderKLCogVideoX, CogVideoXDPMScheduler, CogVideoXPipeline, CogVideoXTransformer3DModel
 
 
-prompt = "A man riding a horse is jumping over a fence."
+prompt = "A woman wearing blue dress is dancing on the ground in front of a lot of person."
 negative_prompt = ""
-words = ["man"]
-frame_idx_as_query = 13  # from 1 to 13
+words = ["woman"]
+frame_idx_as_query = 2  # from 1 to 13
 pos = [15, 23]
 seed = 42
 save_text_attention = False
-device = "cuda:1"
+device = "cuda:2"
 
 NUM_INFERENCE_STEPS = 50
 ROOT = "attention_map"
@@ -76,7 +78,10 @@ pipe = VisAttnMapCogVideoXPipeline.from_pretrained(
 pipe.vae.enable_tiling()
 pipe.to(device)
 
+latents = torch.load("outputs/dance-twirl/ddim_latents/noisy_latents_999.pt")
+
 video = pipe(
+    latents=latents,
     prompt=prompt,
     negative_prompt=negative_prompt,
     words=words,
@@ -95,6 +100,26 @@ os.makedirs(save_root, exist_ok=True)
 
 video_path = os.path.join(save_root, "video.mp4")
 export_to_video(video, video_path, fps=8)
+
+attention_map = 0
+for value in attention_store.attention_store.values():
+    attention_map += value
+
+attention_map = attention_map.flatten(0, 1)
+f_idx = 0
+for i in range(0, 17550, 1350):
+    cross_frame_attention_map = attention_map[:, i: i+1350].to(torch.float32)
+    # 将tensor转换为numpy数组
+    data = cross_frame_attention_map.numpy()
+
+    # 创建热力图
+    plt.figure(figsize=(10, 10))  # 可以调整热力图大小
+    sns.heatmap(data, cmap='YlGnBu', cbar=True)
+
+    # 保存为jpg文件
+    plt.savefig(f'{f_idx}.jpg', format='jpg', dpi=300, bbox_inches='tight')
+    f_idx += 1
+
 
 if save_text_attention:
     attention_map_dir = os.path.join(save_root, "text_attn_maps")

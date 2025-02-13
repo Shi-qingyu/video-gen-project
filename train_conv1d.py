@@ -47,7 +47,7 @@ from diffusers.utils import check_min_version, convert_unet_state_dict_to_peft, 
 from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_card
 from diffusers.utils.torch_utils import is_compiled_module
 
-from src.new.attention_processor import MyCogVideoXAttnProcessor2_0
+from src.new.attention_processor import SkipConv1dCogVideoXAttnProcessor2_0
 from utils import high_frequency_filter, read_mask_from_dir
 
 if is_wandb_available():
@@ -288,15 +288,9 @@ def get_args():
         help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",
     )
     parser.add_argument(
-        "--learning_rate_emb",
+        "--learning_rate",
         type=float,
         default=1e-3,
-        help="Initial learning rate (after the potential warmup period) to use.",
-    )
-    parser.add_argument(
-        "--learning_rate_lora",
-        type=float,
-        default=1e-4,
         help="Initial learning rate (after the potential warmup period) to use.",
     )
     parser.add_argument(
@@ -1170,15 +1164,6 @@ def main(args):
     transformer.to(accelerator.device, dtype=weight_dtype)
     vae.to(accelerator.device, dtype=weight_dtype)
 
-    # now we will add new LoRA weights to the attention layers
-    transformer_lora_config = LoraConfig(
-        r=args.rank,
-        lora_alpha=args.lora_alpha,
-        init_lora_weights=True,
-        target_modules=["to_v", "to_out.0"],
-    )
-    transformer.add_adapter(transformer_lora_config)
-
     height = transformer.config.sample_height // transformer.config.patch_size
     width = transformer.config.sample_width // transformer.config.patch_size
     frames = transformer.config.sample_frames // transformer.config.temporal_compression_ratio + 1
@@ -1186,7 +1171,7 @@ def main(args):
 
     attn_processors = {}
     for key, value in transformer.attn_processors.items():
-        attn_processor = MyCogVideoXAttnProcessor2_0(
+        attn_processor = SkipConv1dCogVideoXAttnProcessor2_0(
             height=height, width=width, frames=frames, dim=dim
         ).to(accelerator.device, dtype=weight_dtype)
         for param in attn_processor.parameters():
@@ -1216,14 +1201,7 @@ def main(args):
                             embedding_state_dict[name] = param
                     torch.save(embedding_state_dict, save_path)
 
-                    transformer_lora_layers_to_save = get_peft_model_state_dict(model)
-
                 weights.pop()
-
-            CogVideoXPipeline.save_lora_weights(
-                output_dir,
-                transformer_lora_layers=transformer_lora_layers_to_save,
-            )
 
     accelerator.register_save_state_pre_hook(save_model_hook)
 
@@ -1291,18 +1269,13 @@ def main(args):
         cast_training_params([transformer], dtype=torch.float32)
 
     transformer_motion_embedding_parameters = []
-    lora_parameters = []
     for name, param in transformer.named_parameters():
         if "processor" in name and param.requires_grad:
             transformer_motion_embedding_parameters.append(param)
-        elif param.requires_grad:
-            lora_parameters.append(param)
-    assert len(transformer_motion_embedding_parameters) > 0 and len(lora_parameters) > 0
 
     # Optimization parameters
     transformer_parameters_with_lr = {"params": transformer_motion_embedding_parameters, "lr": args.learning_rate_emb}
-    lora_parameters_with_lr = {"params": lora_parameters, "lr": args.learning_rate_lora}
-    params_to_optimize = [transformer_parameters_with_lr, lora_parameters_with_lr]
+    params_to_optimize = [transformer_parameters_with_lr]
 
     use_deepspeed_optimizer = (
         accelerator.state.deepspeed_plugin is not None

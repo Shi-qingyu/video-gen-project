@@ -2,7 +2,7 @@
 
 export MODEL_PATH="THUDM/CogVideoX-5b"
 export DATASET_PATH="./data/dance-twirl"
-export OUTPUT_PATH="results/r_128_lr_1e-4_21-42_dance-twirl"
+export OUTPUT_PATH="results/r_128_lr_1e-4_kv_dance-twirl"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 

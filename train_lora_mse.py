@@ -1070,13 +1070,13 @@ def main(args):
     if args.gradient_checkpointing:
         transformer.enable_gradient_checkpointing()
 
-    target_modules = []
-    for i in range(21, 42):
-        to_q = str(i) + ".attn1.to_q"
-        to_k = str(i) + ".attn1.to_k"
-        to_v = str(i) + ".attn1.to_v"
-        to_out = str(i) + ".attn1.to_out.0"
-        target_modules.extend([to_q, to_k, to_v, to_out])
+    target_modules = ["to_k", "to_v", "to_out.0"]
+    # for i in range(21, 42):
+    #     to_q = str(i) + ".attn1.to_q"
+    #     to_k = str(i) + ".attn1.to_k"
+    #     to_v = str(i) + ".attn1.to_v"
+    #     to_out = str(i) + ".attn1.to_out.0"
+    #     target_modules.extend([to_q, to_k, to_v, to_out])
 
     # now we will add new LoRA weights to the attention layers
     transformer_lora_config = LoraConfig(
