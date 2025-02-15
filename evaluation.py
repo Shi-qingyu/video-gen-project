@@ -1,9 +1,18 @@
+import argparse
 from pathlib import Path
+from omegaconf import OmegaConf
 
 import torch
 import torch.nn.functional as F
+from einops import rearrange
 
 from transformers import CLIPModel, CLIPProcessor, ViTImageProcessor, ViTModel
+
+import numpy as np
+from PIL import Image
+
+from cotracker.predictor import CoTrackerPredictor
+from cotracker.utils.visualizer import read_video_from_path
 
 
 def calculate_clip(model, processor, text, images_or_path):
@@ -61,6 +70,35 @@ def calculate_dino(model, processor, video_or_path):
     return (first_image_sim + prev_image_sim) / 2
 
 
+def get_similarity_matrix(tracklets1, tracklets2):
+    displacements1 = tracklets1[:, 1:] - tracklets1[:, :-1]
+    displacements1 = displacements1 / displacements1.norm(dim=-1, keepdim=True)
+
+    displacements2 = tracklets2[:, 1:] - tracklets2[:, :-1]
+    displacements2 = displacements2 / displacements2.norm(dim=-1, keepdim=True)
+
+    similarity_matrix = torch.einsum("ntc, mtc -> nmt", displacements1, displacements2).mean(dim=-1)
+    return similarity_matrix
+
+
+def get_score(similarity_matrix):
+    similarity_matrix_eye = similarity_matrix - torch.eye(similarity_matrix.shape[0]).to(similarity_matrix.device)
+    # for each row find the most similar element
+    max_similarity, _ = similarity_matrix_eye.max(dim=1)
+    average_score = max_similarity.mean()
+    return {
+        "average_score": average_score.item(),
+    }
+
+
+def get_tracklets(model, video_path, mask=None):
+    video = read_video_from_path(video_path)
+    video = torch.from_numpy(video).permute(0, 3, 1, 2)[None].float().cuda()
+    pred_tracks_small, pred_visibility_small = model(video, grid_size=55, segm_mask=mask)
+    pred_tracks_small = rearrange(pred_tracks_small, "b t l c -> (b l) t c ")
+    return pred_tracks_small
+
+
 def clip_score(root="", device="cuda"):
     model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
     processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
@@ -101,87 +139,53 @@ def dino_score(root="", device="cuda"):
 
     return dino_score / cnt
 
-import argparse
-from pathlib import Path
 
-import numpy as np
-import torch
-from PIL import Image
-from cotracker.predictor import CoTrackerPredictor
-from cotracker.utils.visualizer import read_video_from_path
-from einops import rearrange
-from omegaconf import OmegaConf
+def motion_fidelity(data_root, gen_root, offline_cotracker_model_path, device="cuda"):
+    data_root = Path(data_root)
+    gen_root = Path(gen_root)
 
+    model = CoTrackerPredictor(checkpoint=offline_cotracker_model_path)
+    model = model.to(device=device)
 
-def get_similarity_matrix(tracklets1, tracklets2):
-    displacements1 = tracklets1[:, 1:] - tracklets1[:, :-1]
-    displacements1 = displacements1 / displacements1.norm(dim=-1, keepdim=True)
+    motion_fidelity_score = 0
+    cnt = 0
 
-    displacements2 = tracklets2[:, 1:] - tracklets2[:, :-1]
-    displacements2 = displacements2 / displacements2.norm(dim=-1, keepdim=True)
+    for data in data_root.iterdir():
+        original_video_path = data.joinpath("videos", data.name+".mp4")
 
-    similarity_matrix = torch.einsum("ntc, mtc -> nmt", displacements1, displacements2).mean(dim=-1)
-    return similarity_matrix
+        segm_mask = data.joinpath("masks", data.name, "00000.png")
+        if segm_mask.is_file():
+            segm_mask = np.array(Image.open(segm_mask))
+            segm_mask = torch.from_numpy(segm_mask).float() / 255
+            box_mask = torch.zeros_like(segm_mask)
+            minx = segm_mask.nonzero()[:, 0].min()
+            maxx = segm_mask.nonzero()[:, 0].max()
+            miny = segm_mask.nonzero()[:, 1].min()
+            maxy = segm_mask.nonzero()[:, 1].max()
+            box_mask[minx:maxx, miny:maxy] = 1
+            box_mask = box_mask[None, None]
+        else:
+            box_mask = None       
 
+        original_tracklets = get_tracklets(model, original_video_path, mask=box_mask)
 
-def get_score(similarity_matrix):
-    similarity_matrix_eye = similarity_matrix - torch.eye(similarity_matrix.shape[0]).to(similarity_matrix.device)
-    # for each row find the most similar element
-    max_similarity, _ = similarity_matrix_eye.max(dim=1)
-    average_score = max_similarity.mean()
-    return {
-        "average_score": average_score.item(),
-    }
-
-
-def get_tracklets(model, video_path, mask=None):
-    video = read_video_from_path(video_path)
-    video = torch.from_numpy(video).permute(0, 3, 1, 2)[None].float().cuda()
-    pred_tracks_small, pred_visibility_small = model(video, grid_size=55, segm_mask=mask)
-    pred_tracks_small = rearrange(pred_tracks_small, "b t l c -> (b l) t c ")
-    return pred_tracks_small
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config_path", type=str, default="configs/motion_fidelity_score_config.yaml")
-    opt = parser.parse_args()
-    config = OmegaConf.load(opt.config_path)
-
-    model = CoTrackerPredictor(checkpoint=config.cotracker_model_path)
-    model = model.cuda()
-
-    video_path = config.edit_video_path
-    original_video_path = config.original_video_path
-
-    if config.use_mask:  # calculate trajectories only on the foreground of the video
-        segm_mask = np.array(
-            Image.open(config.mask_path)
-        )
-        segm_mask = torch.tensor(segm_mask).float() / 255
-        # get bounding box mask from segmentation mask - rectangular mask that covers the segmentation mask
-        box_mask = torch.zeros_like(segm_mask)
-        minx = segm_mask.nonzero()[:, 0].min()
-        maxx = segm_mask.nonzero()[:, 0].max()
-        miny = segm_mask.nonzero()[:, 1].min()
-        maxy = segm_mask.nonzero()[:, 1].max()
-        box_mask[minx:maxx, miny:maxy] = 1
-        box_mask = box_mask[None, None]
-    else:
-        box_mask = None
-
-    edit_tracklets = get_tracklets(model, video_path, mask=box_mask)
-    original_tracklets = get_tracklets(model, original_video_path, mask=box_mask)
-    similarity_matrix = get_similarity_matrix(edit_tracklets, original_tracklets)
-    similarity_scores_dict = get_score(similarity_matrix)
-
-    save_dict = {
-        "similarity_matrix": similarity_matrix.cpu(),
-        "similarity_scores": similarity_scores_dict,
-    }
-    torch.save(save_dict, Path(config.output_path) / "metrics.pt")
-    print("Motion similarity score: ", similarity_scores_dict["average_score"])
+        eval_prompts = data.joinpath("eval_prompts.txt")
+        with open(eval_prompts.as_posix(), "r") as file:
+            eval_prompts = file.read().splitlines()
+        
+        for eval_prompt in eval_prompts:
+            video_dir = gen_root.joinpath(eval_prompt[:-1] if eval_prompt.endswith(".") else eval_prompt)
+            for gen_video_path in video_dir.iterdir():
+                if gen_video_path.is_file() and gen_video_path.suffix.endswith("mp4"):
+                    gen_tracklets = get_tracklets(model, gen_video_path, mask=box_mask)
+                    similarity_matrix = get_similarity_matrix(gen_tracklets, original_tracklets)
+                    similarity_scores_dict = get_score(similarity_matrix)
+                    score = similarity_scores_dict["average_score"]
+                    motion_fidelity_score += score
+                    cnt += 1
+        
+    return motion_fidelity_score / cnt
 
 
 if __name__ == "__main__":
-    print(clip_score(root="outputs_benchmark", device="cuda"))
+    pass

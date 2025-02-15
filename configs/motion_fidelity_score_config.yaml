@@ -1,0 +1,9 @@
+edit_video_path: outputs/A_gorilla_is_dancing_in_the_desert/lr_1e-5_skipconv1d_mid_128_mse_1.0_dance-twirl_checkpoint-500_0-15_3.mp4
+original_video_path: data/dance-twirl/videos/dance-twirl.mp4
+output_path: ./
+
+# foreground mask of the first frame to calculate trajectories only on the foreground
+use_mask: False
+mask_path: null
+
+cotracker_model_path: ../../track/co-tracker/checkpoints/scaled_offline.pth
