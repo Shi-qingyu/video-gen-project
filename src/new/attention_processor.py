@@ -8,13 +8,14 @@ import torch.nn.functional as F
 
 
 class Conv1DModule(nn.Module):
-    def __init__(self, input_channels, mid_channels, output_channels=None):
+    def __init__(self, input_channels, mid_channels, output_channels=None, kernel_size=3):
         super(Conv1DModule, self).__init__()
         output_channels = output_channels if output_channels else input_channels
+        padding = kernel_size // 2
 
-        self.conv1 = nn.Conv1d(input_channels, mid_channels, kernel_size=3, padding=1, bias=False)
+        self.conv1 = nn.Conv1d(input_channels, mid_channels, kernel_size=kernel_size, padding=padding, bias=False)
         self.act = nn.GELU()
-        self.conv2 = nn.Conv1d(mid_channels, output_channels, kernel_size=3, padding=1, bias=False)
+        self.conv2 = nn.Conv1d(mid_channels, output_channels, kernel_size=kernel_size, padding=padding, bias=False)
 
         self.init_param()
     
@@ -117,13 +118,13 @@ class KVConv1dCogVideoXAttnProcessor2_0(nn.Module):
 
 
 class SkipConv1dCogVideoXAttnProcessor2_0(nn.Module):
-    def __init__(self, height, width, frames, dim, rank=128):
+    def __init__(self, height, width, frames, dim, rank=128, kernel_size=3):
         super().__init__()
         self.height = height
         self.width = width
         self.frames = frames
         self.dim = dim
-        self.temporal_emb = Conv1DModule(input_channels=dim, mid_channels=rank)
+        self.temporal_emb = Conv1DModule(input_channels=dim, mid_channels=rank, kernel_size=kernel_size)
     
     def __call__(
         self,

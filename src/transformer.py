@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional, Tuple, Union
 import torch
 from torch import nn
 
-from .transformer_block import MyCogVideoXBlock, MyRegionCogVideoXBlock
+from .transformer_block import VisAttnMapCogVideoXBlock, RegionCogVideoXBlock
 
 
 class MyCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
@@ -178,7 +178,7 @@ class VisAttnMapCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
         # 3. Define spatio-temporal transformers blocks
         self.transformer_blocks = nn.ModuleList(
             [
-                MyCogVideoXBlock(
+                VisAttnMapCogVideoXBlock(
                     dim=inner_dim,
                     num_attention_heads=num_attention_heads,
                     attention_head_dim=attention_head_dim,
@@ -289,7 +289,7 @@ class VisAttnMapCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
         return Transformer2DModelOutput(sample=output)
 
 
-class MyRegionCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
+class RegionCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
     _supports_gradient_checkpointing = True
 
     @register_to_config
@@ -353,7 +353,7 @@ class MyRegionCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
         # 3. Define spatio-temporal transformers blocks
         self.transformer_blocks = nn.ModuleList(
             [
-                MyRegionCogVideoXBlock(
+                RegionCogVideoXBlock(
                     dim=inner_dim,
                     num_attention_heads=num_attention_heads,
                     attention_head_dim=attention_head_dim,

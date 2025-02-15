@@ -186,6 +186,12 @@ def get_args():
         help=("The mid dimension of the temporal conv1d."),
     )
     parser.add_argument(
+        "--kernel_size",
+        type=int,
+        default=3,
+        help=("Size of kernel in temporal conv1d."),
+    )
+    parser.add_argument(
         "--version",
         type=str,
         default="skipconv1d",

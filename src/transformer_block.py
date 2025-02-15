@@ -13,10 +13,10 @@ from typing import Any, Dict, Optional, Tuple, Union
 import torch
 from torch import nn
 
-from .attention_processor import CogVideoXAttnProcessor3_0, RegionCogVideoXAttnProcessor2_0, RegionCogVideoXAttnProcessor3_0
+from .attention_processor import VisAttnMapCogVideoXAttnProcessor2_0, RegionCogVideoXAttnProcessor2_0
 
 
-class MyCogVideoXBlock(nn.Module):
+class VisAttnMapCogVideoXBlock(nn.Module):
     def __init__(
         self,
         dim: int,
@@ -49,7 +49,7 @@ class MyCogVideoXBlock(nn.Module):
             eps=1e-6,
             bias=attention_bias,
             out_bias=attention_out_bias,
-            processor=CogVideoXAttnProcessor3_0(block_idx=block_idx),
+            processor=VisAttnMapCogVideoXAttnProcessor2_0(block_idx=block_idx),
         )
 
         # 2. Feed Forward
@@ -105,7 +105,7 @@ class MyCogVideoXBlock(nn.Module):
         return hidden_states, encoder_hidden_states
 
 
-class MyRegionCogVideoXLayerNormZero(nn.Module):
+class RegionCogVideoXLayerNormZero(nn.Module):
     def __init__(
         self,
         conditioning_dim: int,
@@ -133,7 +133,7 @@ class MyRegionCogVideoXLayerNormZero(nn.Module):
         return hidden_states, encoder_hidden_states, gate[:, None, :], enc_gate[:, None, :], region_prompt_embs
 
 
-class MyRegionCogVideoXBlock(nn.Module):
+class RegionCogVideoXBlock(nn.Module):
     def __init__(
         self,
         dim: int,
@@ -154,7 +154,7 @@ class MyRegionCogVideoXBlock(nn.Module):
         super().__init__()
 
         # 1. Self Attention
-        self.norm1 = MyRegionCogVideoXLayerNormZero(time_embed_dim, dim, norm_elementwise_affine, norm_eps, bias=True)
+        self.norm1 = RegionCogVideoXLayerNormZero(time_embed_dim, dim, norm_elementwise_affine, norm_eps, bias=True)
 
         self.attn1 = Attention(
             query_dim=dim,
@@ -164,11 +164,11 @@ class MyRegionCogVideoXBlock(nn.Module):
             eps=1e-6,
             bias=attention_bias,
             out_bias=attention_out_bias,
-            processor=RegionCogVideoXAttnProcessor3_0(),
+            processor=RegionCogVideoXAttnProcessor2_0(),
         )
 
         # 2. Feed Forward
-        self.norm2 = MyRegionCogVideoXLayerNormZero(time_embed_dim, dim, norm_elementwise_affine, norm_eps, bias=True)
+        self.norm2 = RegionCogVideoXLayerNormZero(time_embed_dim, dim, norm_elementwise_affine, norm_eps, bias=True)
 
         self.ff = FeedForward(
             dim,
