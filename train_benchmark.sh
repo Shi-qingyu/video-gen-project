@@ -28,7 +28,7 @@ for DATASET_SUBDIR in "$BASE_DATA_DIR"/*/; do
         DATASET_PATH="$BASE_DATA_DIR/$DATASET_NAME"
 
         # Define the OUTPUT_PATH based on the dataset name
-        OUTPUT_PATH="$BASE_OUTPUT_DIR/lr_1e-3_spatial_frozen_temporal_lr_1e-3_step_200_$DATASET_NAME"
+        OUTPUT_PATH="$BASE_OUTPUT_DIR/lr_1e-5_skipconv1d_kernel_3_mid_128_mse_1.0_$DATASET_NAME"
 
         # Export the environment variables for the current iteration
         export DATASET_PATH
@@ -43,34 +43,36 @@ for DATASET_SUBDIR in "$BASE_DATA_DIR"/*/; do
 
         # Execute the training command
         accelerate launch --config_file configs/accelerate_config_machine_single.yaml --main_process_port 8000 --multi_gpu \
-          train_motion_embedding.py \
-          --gradient_checkpointing \
-          --use_8bit_adam  \
-          --pretrained_model_name_or_path "$MODEL_PATH" \
-          --enable_tiling \
-          --enable_slicing \
-          --instance_data_root "$DATASET_PATH" \
-          --caption_column prompts.txt \
-          --video_column videos.txt \
-          --seed 0 \
-          --mixed_precision bf16 \
-          --output_dir "$OUTPUT_PATH" \
-          --height 480 \
-          --width 720 \
-          --fps 8 \
-          --max_num_frames 49 \
-          --skip_frames_start 0 \
-          --skip_frames_end 0 \
-          --train_batch_size 1 \
-          --max_train_steps 500 \
-          --checkpointing_steps 100 \
-          --resume_from_checkpoint "$BASE_OUTPUT_DIR/lr_1e-3_spatial_$DATASET_NAME/checkpoint-200/motion_embedding.pth" \
-          --gradient_accumulation_steps 1 \
-          --learning_rate 1e-3 \
-          --optimizer AdamW \
-          --adam_beta1 0.9 \
-          --adam_beta2 0.95 \
-          --version "spatial_frozen_temporal"
+            train_conv1d.py \
+            --gradient_checkpointing \
+            --use_8bit_adam  \
+            --pretrained_model_name_or_path $MODEL_PATH \
+            --enable_tiling \
+            --enable_slicing \
+            --rank 128 \
+            --version skipconv1d \
+            --instance_data_root $DATASET_PATH \
+            --caption_column prompts.txt \
+            --video_column videos.txt \
+            --seed 0 \
+            --mixed_precision bf16 \
+            --output_dir $OUTPUT_PATH \
+            --height 480 \
+            --width 720 \
+            --fps 8 \
+            --max_num_frames 49 \
+            --skip_frames_start 0 \
+            --skip_frames_end 0 \
+            --train_batch_size 1 \
+            --max_train_steps 500 \
+            --checkpointing_steps 100 \
+            --resume_from_checkpoint "" \
+            --gradient_accumulation_steps 4 \
+            --learning_rate 1e-5 \
+            --optimizer AdamW \
+            --adam_beta1 0.9 \
+            --adam_beta2 0.95 \
+            --mse_weight 1.0
 
         echo "Training completed for dataset: $DATASET_NAME"
         echo "Output saved to: $OUTPUT_PATH"
