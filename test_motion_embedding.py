@@ -10,11 +10,11 @@ from src.transformer import MyCogVideoXTransformer3DModel
 
 from utils import read_mask_from_dir
 
-prompt = "A robot is dancing on the grassland."
+prompt = "A gorilla is dancing in the desert."
 seed = 42
-device = "cuda:2"
-ckpt_path = "checkpoints/lr_1e-3_adaptive_spatial_temporal_bg_mse_1.0_dance-twirl/checkpoint-500/motion_embedding.pth"
-version = "adaptive_spatial_temporal"
+device = "cuda:0"
+ckpt_path = "checkpoints/lr_1e-3_spatial_temporal_dance-twirl/checkpoint-500/motion_embedding.pth"
+version = "spatial_temporal"
 
 config = "_".join(ckpt_path.split("/")[1: 3])
 case = ckpt_path.split("/")[1].split("_")[-1]

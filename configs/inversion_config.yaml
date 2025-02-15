@@ -1,8 +1,8 @@
-video_path: baseline.mp4
-save_dir: outputs/dogcat/ddim_latents
+video_path: data/dance-twirl/videos/dance-twirl.mp4
+save_dir: outputs/dance-twirl/ddim_latents
 max_number_of_frames: 49
 
-n_timesteps: 50
+n_timesteps: 1000
 prompt: A dog is walking with a cat on grassland.
 negative_prompt: ""
 save_ddim_reconstruction: True

@@ -183,13 +183,13 @@ def get_args():
         "--rank",
         type=int,
         default=128,
-        help=("The dimension of the LoRA update matrices."),
+        help=("The mid dimension of the temporal conv1d."),
     )
     parser.add_argument(
-        "--lora_alpha",
-        type=float,
-        default=128,
-        help=("The scaling factor to scale LoRA weight update. The actual scaling factor is `lora_alpha / rank`"),
+        "--version",
+        type=str,
+        default="skipconv1d",
+        help=("The version of temporal conv1d."),
     )
     parser.add_argument(
         "--mixed_precision",
@@ -435,14 +435,6 @@ def get_args():
             ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
         ),
     )
-    parser.add_argument(
-        "--version",
-        type=str,
-        default="spatial_temporal",
-        help=(
-            'MotionEmbedding\'s version.'
-        ),
-    )
 
     return parser.parse_args()
 
@@ -456,7 +448,6 @@ class VideoDataset(Dataset):
         caption_column: str = "prompts.txt",
         video_column: str = "videos.txt",
         trajectory_column: str = "trajectories.txt",
-        mask_column: str = "masks.txt",
         height: int = 480,
         width: int = 720,
         fps: int = 8,
@@ -474,7 +465,6 @@ class VideoDataset(Dataset):
         self.caption_column = caption_column
         self.video_column = video_column
         self.trajectory_column = trajectory_column
-        self.mask_column = mask_column
         self.height = height
         self.width = width
         self.fps = fps
@@ -484,7 +474,7 @@ class VideoDataset(Dataset):
         self.cache_dir = cache_dir
         self.id_token = id_token or ""
 
-        self.instance_prompts, self.instance_video_paths, self.instance_trajectories, self.instance_mask_paths = self._load_dataset_from_local_path()
+        self.instance_prompts, self.instance_video_paths, self.instance_trajectories = self._load_dataset_from_local_path()
 
         self.num_instance_videos = len(self.instance_video_paths)
         if self.num_instance_videos != len(self.instance_prompts):
@@ -492,7 +482,7 @@ class VideoDataset(Dataset):
                 f"Expected length of instance prompts and videos to be the same but found {len(self.instance_prompts)=} and {len(self.instance_video_paths)=}. Please ensure that the number of caption prompts and videos match in your dataset."
             )
 
-        self.instance_videos, self.instance_trajectories, self.instance_local_trajectories, self.instance_video_masks = self._preprocess_data()
+        self.instance_videos, self.instance_trajectories = self._preprocess_data()
 
     def __len__(self):
         return self.num_instance_videos
@@ -502,8 +492,6 @@ class VideoDataset(Dataset):
             "instance_prompt": self.id_token + self.instance_prompts[index],
             "instance_video": self.instance_videos[index],
             "instance_trajectory": self.instance_trajectories[index],
-            "instance_local_trajectory": self.instance_local_trajectories[index],
-            "instance_video_mask": self.instance_video_masks[index],
         }
     
     def _load_dataset_from_local_path(self):
@@ -513,7 +501,6 @@ class VideoDataset(Dataset):
         prompt_path = self.instance_data_root.joinpath(self.caption_column)
         video_path = self.instance_data_root.joinpath(self.video_column)
         trajectory_path = self.instance_data_root.joinpath(self.trajectory_column)
-        mask_path = self.instance_data_root.joinpath(self.mask_column)
 
         if not prompt_path.exists() or not prompt_path.is_file():
             raise ValueError(
@@ -534,17 +521,13 @@ class VideoDataset(Dataset):
             instance_trajectories = [
                 self.instance_data_root.joinpath(line.strip()) for line in file.readlines() if len(line.strip()) > 0
             ]
-        with open(mask_path, "r", encoding="utf-8") as file:
-            instance_mask_paths = [
-                self.instance_data_root.joinpath(line.strip()) for line in file.readlines() if len(line.strip()) > 0
-            ]
 
         if any(not path.is_file() for path in instance_videos):
             raise ValueError(
                 "Expected '--video_column' to be a path to a file in `--instance_data_root` containing line-separated paths to video data but found atleast one path that is not a valid file."
             )
 
-        return instance_prompts, instance_videos, instance_trajectories, instance_mask_paths
+        return instance_prompts, instance_videos, instance_trajectories
 
     def _preprocess_data(self):
         try:
@@ -557,56 +540,44 @@ class VideoDataset(Dataset):
         decord.bridge.set_bridge("torch")
 
         videos = []
-        video_masks = []
         trajectories = []
-        local_trajectories = []
+
         train_transforms = transforms.Compose(
             [
                 transforms.Lambda(lambda x: x / 255.0 * 2.0 - 1.0),
             ]
         )
 
-        for filename, trajectory_filename, mask_dir in zip(self.instance_video_paths, self.instance_trajectories, self.instance_mask_paths):
+        for filename, trajectory_filename in zip(self.instance_video_paths, self.instance_trajectories):
             video_reader = decord.VideoReader(uri=filename.as_posix(), width=self.width, height=self.height)
-            video_mask = read_mask_from_dir(mask_dir, target_shape=(self.height, self.width))
             trajectory = torch.load(trajectory_filename.as_posix())    # (F, N, 2)
-            local_trajectory = torch.load(trajectory_filename.as_posix().replace("trajectories.pth", "local_trajectories.pth")) # (F, N', 2)
-            self.complexity = local_trajectory.size(1)
 
             video_num_frames = len(video_reader)
             start_frame = min(self.skip_frames_start, video_num_frames)
             end_frame = max(0, video_num_frames - self.skip_frames_end)
             if end_frame <= start_frame:
                 frames = video_reader.get_batch([start_frame])
-                masks = video_mask[[start_frame]]
                 trajectory = trajectory[[start_frame]]
-                local_trajectory = local_trajectory[[start_frame]]
+
             elif end_frame - start_frame <= self.max_num_frames:
                 frames = video_reader.get_batch(list(range(start_frame, end_frame)))
-                masks = video_mask[list(range(start_frame, end_frame))]
                 trajectory = trajectory[list(range(start_frame, end_frame))]
-                local_trajectory = local_trajectory[list(range(start_frame, end_frame))]
+
             else:
                 indices = list(range(start_frame, end_frame, (end_frame - start_frame) // self.max_num_frames))
                 frames = video_reader.get_batch(indices)
-                masks = video_mask[indices]
                 trajectory = trajectory[indices]
-                local_trajectory = local_trajectory[indices]
 
             # Ensure that we don't go over the limit
             frames = frames[: self.max_num_frames]
-            masks = masks[: self.max_num_frames]
             trajectory = trajectory[: self.max_num_frames]
-            local_trajectory = local_trajectory[: self.max_num_frames]
             selected_num_frames = frames.shape[0]
 
             # Choose first (4k + 1) frames as this is how many is required by the VAE
             remainder = (3 + (selected_num_frames % 4)) % 4
             if remainder != 0:
                 frames = frames[:-remainder]
-                masks = masks[:-remainder]
                 trajectory = trajectory[:-remainder]
-                local_trajectory = local_trajectory[:-remainder]
             selected_num_frames = frames.shape[0]
 
             assert (selected_num_frames - 1) % 4 == 0
@@ -615,145 +586,9 @@ class VideoDataset(Dataset):
             frames = frames.float()
             frames = torch.stack([train_transforms(frame) for frame in frames], dim=0)
             videos.append(frames.permute(0, 3, 1, 2).contiguous())  # frames.shape: [F, C, H, W]
-            video_masks.append(masks.contiguous())  # masks.shape: [F, H, W]
-
             trajectories.append(trajectory)
-            local_trajectories.append(local_trajectory)
 
-        return videos, trajectories, local_trajectories, video_masks
-
-
-class SimpleVideoDataset(Dataset):
-    def __init__(
-        self,
-        instance_data_root: Optional[str] = None,
-        dataset_name: Optional[str] = None,
-        dataset_config_name: Optional[str] = None,
-        caption_column: str = "prompts.txt",
-        video_column: str = "videos.txt",
-        height: int = 480,
-        width: int = 720,
-        fps: int = 8,
-        max_num_frames: int = 49,
-        skip_frames_start: int = 0,
-        skip_frames_end: int = 0,
-        cache_dir: Optional[str] = None,
-        id_token: Optional[str] = None,
-    ) -> None:
-        super().__init__()
-
-        self.instance_data_root = Path(instance_data_root) if instance_data_root is not None else None
-        self.dataset_name = dataset_name
-        self.dataset_config_name = dataset_config_name
-        self.caption_column = caption_column
-        self.video_column = video_column
-        self.height = height
-        self.width = width
-        self.fps = fps
-        self.max_num_frames = max_num_frames
-        self.skip_frames_start = skip_frames_start
-        self.skip_frames_end = skip_frames_end
-        self.cache_dir = cache_dir
-        self.id_token = id_token or ""
-
-        self.instance_prompts, self.instance_video_paths = self._load_dataset_from_local_path()
-
-        self.num_instance_videos = len(self.instance_video_paths)
-        if self.num_instance_videos != len(self.instance_prompts):
-            raise ValueError(
-                f"Expected length of instance prompts and videos to be the same but found {len(self.instance_prompts)=} and {len(self.instance_video_paths)=}. Please ensure that the number of caption prompts and videos match in your dataset."
-            )
-
-        self.instance_videos = self._preprocess_data()
-
-    def __len__(self):
-        return self.num_instance_videos
-
-    def __getitem__(self, index):
-        return {
-            "instance_prompt": self.id_token + self.instance_prompts[index],
-            "instance_video": self.instance_videos[index],
-        }
-    
-    def _load_dataset_from_local_path(self):
-        if not self.instance_data_root.exists():
-            raise ValueError("Instance videos root folder does not exist")
-
-        prompt_path = self.instance_data_root.joinpath(self.caption_column)
-        video_path = self.instance_data_root.joinpath(self.video_column)
-
-        if not prompt_path.exists() or not prompt_path.is_file():
-            raise ValueError(
-                "Expected `--caption_column` to be path to a file in `--instance_data_root` containing line-separated text prompts."
-            )
-        if not video_path.exists() or not video_path.is_file():
-            raise ValueError(
-                "Expected `--video_column` to be path to a file in `--instance_data_root` containing line-separated paths to video data in the same directory."
-            )
-
-        with open(prompt_path, "r", encoding="utf-8") as file:
-            instance_prompts = [line.strip() for line in file.readlines() if len(line.strip()) > 0]
-        with open(video_path, "r", encoding="utf-8") as file:
-            instance_videos = [
-                self.instance_data_root.joinpath(line.strip()) for line in file.readlines() if len(line.strip()) > 0
-            ]
-
-        if any(not path.is_file() for path in instance_videos):
-            raise ValueError(
-                "Expected '--video_column' to be a path to a file in `--instance_data_root` containing line-separated paths to video data but found atleast one path that is not a valid file."
-            )
-
-        return instance_prompts, instance_videos
-
-    def _preprocess_data(self):
-        try:
-            import decord
-        except ImportError:
-            raise ImportError(
-                "The `decord` package is required for loading the video dataset. Install with `pip install decord`"
-            )
-
-        decord.bridge.set_bridge("torch")
-
-        videos = []
-        train_transforms = transforms.Compose(
-            [
-                transforms.Lambda(lambda x: x / 255.0 * 2.0 - 1.0),
-            ]
-        )
-
-        for filename in self.instance_video_paths:
-            video_reader = decord.VideoReader(uri=filename.as_posix(), width=self.width, height=self.height)
-
-            video_num_frames = len(video_reader)
-            start_frame = min(self.skip_frames_start, video_num_frames)
-            end_frame = max(0, video_num_frames - self.skip_frames_end)
-            if end_frame <= start_frame:
-                frames = video_reader.get_batch([start_frame])
-            elif end_frame - start_frame <= self.max_num_frames:
-                frames = video_reader.get_batch(list(range(start_frame, end_frame)))
-            else:
-                indices = list(range(start_frame, end_frame, (end_frame - start_frame) // self.max_num_frames))
-                frames = video_reader.get_batch(indices)
-
-            # Ensure that we don't go over the limit
-            frames = frames[: self.max_num_frames]
-            selected_num_frames = frames.shape[0]
-
-            # Choose first (4k + 1) frames as this is how many is required by the VAE
-            remainder = (3 + (selected_num_frames % 4)) % 4
-            if remainder != 0:
-                frames = frames[:-remainder]
-            selected_num_frames = frames.shape[0]
-
-            assert (selected_num_frames - 1) % 4 == 0
-
-            # Training transforms
-            frames = frames.float()
-            frames = torch.stack([train_transforms(frame) for frame in frames], dim=0)
-            videos.append(frames.permute(0, 3, 1, 2).contiguous())  # frames.shape: [F, C, H, W]
-
-        return videos
+        return videos, trajectories
 
 
 def log_validation(
@@ -1081,7 +916,7 @@ def main(args):
             ).repo_id
 
     # Dataset and DataLoader
-    train_dataset = SimpleVideoDataset(
+    train_dataset = VideoDataset(
         instance_data_root=args.instance_data_root,
         dataset_name=args.dataset_name,
         dataset_config_name=args.dataset_config_name,
@@ -1169,15 +1004,24 @@ def main(args):
     frames = transformer.config.sample_frames // transformer.config.temporal_compression_ratio + 1
     dim = transformer.config.num_attention_heads * transformer.config.attention_head_dim
 
+    if args.version == "skipconv1d":
+        attn_processor_type = SkipConv1dCogVideoXAttnProcessor2_0
+    else:
+        raise ValueError(f"Unexpected version: {args.version}")
+
     attn_processors = {}
     for key, value in transformer.attn_processors.items():
-        attn_processor = SkipConv1dCogVideoXAttnProcessor2_0(
-            height=height, width=width, frames=frames, dim=dim
-        ).to(accelerator.device, dtype=weight_dtype)
-        for param in attn_processor.parameters():
-            param.requires_grad_(True)
+        block_idx = int(key.split(".")[1])
 
-        attn_processors[key] = attn_processor
+        if block_idx in list(range(42)):
+            attn_processor = attn_processor_type(
+                height=height, width=width, frames=frames, dim=dim, rank=args.rank
+            ).to(accelerator.device, dtype=weight_dtype)
+            for param in attn_processor.parameters():
+                param.requires_grad_(True)
+            attn_processors[key] = attn_processor
+        else:
+            attn_processors[key] = value
 
     transformer.set_attn_processor(attn_processors)
 
@@ -1230,26 +1074,11 @@ def main(args):
             "trajectories": trajectories,
         }
 
-    def simple_collate_fn(examples):
-        videos = [example["instance_video"].sample() * vae.config.scaling_factor for example in examples]
-        prompts = [example["instance_prompt"] for example in examples]
-
-        videos = torch.cat(videos)
-        videos = videos.to(memory_format=torch.contiguous_format).float()
-
-        return {
-            "videos": videos,
-            "masks": None,
-            "prompts": prompts,
-            "trajectories": None,
-            "local_trajectories": None,
-        }
-
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=args.train_batch_size,
         shuffle=True,
-        collate_fn=simple_collate_fn,
+        collate_fn=collate_fn,
         num_workers=args.dataloader_num_workers,
     )
 
@@ -1268,13 +1097,13 @@ def main(args):
         # only upcast trainable parameters (LoRA) into fp32
         cast_training_params([transformer], dtype=torch.float32)
 
-    transformer_motion_embedding_parameters = []
+    transformer_temporal_conv1d_parameters = []
     for name, param in transformer.named_parameters():
         if "processor" in name and param.requires_grad:
-            transformer_motion_embedding_parameters.append(param)
+            transformer_temporal_conv1d_parameters.append(param)
 
     # Optimization parameters
-    transformer_parameters_with_lr = {"params": transformer_motion_embedding_parameters, "lr": args.learning_rate_emb}
+    transformer_parameters_with_lr = {"params": transformer_temporal_conv1d_parameters, "lr": args.learning_rate}
     params_to_optimize = [transformer_parameters_with_lr]
 
     use_deepspeed_optimizer = (
