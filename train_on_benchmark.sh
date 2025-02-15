@@ -4,7 +4,7 @@
 set -e
 
 # Define the base directories
-BASE_DATA_DIR="./data"
+BASE_DATA_DIR="./MTBench_subset/MTBench_hard"
 BASE_OUTPUT_DIR="checkpoints"
 
 # Define the model path
@@ -42,7 +42,7 @@ for DATASET_SUBDIR in "$BASE_DATA_DIR"/*/; do
         mkdir -p "$OUTPUT_PATH"
 
         # Execute the training command
-        accelerate launch --config_file configs/accelerate_config_machine_single.yaml --main_process_port 8000 --multi_gpu \
+        accelerate launch --config_file configs/accelerate_config_machine_single.yaml --main_process_port 8002 --multi_gpu \
             train_conv1d.py \
             --gradient_checkpointing \
             --use_8bit_adam  \

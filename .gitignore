@@ -3,6 +3,7 @@ checkpoints
 outputs
 outputs_benchmark
 data
+MTBench_subset
 
 cache
 .vscode

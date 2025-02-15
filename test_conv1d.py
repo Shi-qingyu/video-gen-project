@@ -7,10 +7,10 @@ from diffusers.utils import export_to_video
 from src.new.attention_processor import SkipConv1dCogVideoXAttnProcessor2_0
 
 
-prompt = "A robot is dancing hip-hop on mars."
+prompt = "A tiger is walking in the forest."
 seed = 42
 device = "cuda"
-ckpt_path = "checkpoints/lr_1e-5_skipconv1d_mid_128_mse_1.0_breakdance/checkpoint-400/motion_embedding.pth"
+ckpt_path = "checkpoints/lr_1e-5_skipconv1d_mid_128_mse_1.0_bear/checkpoint-300/motion_embedding.pth"
 rank = 128
 
 config = "_".join(ckpt_path.split("/")[1: 3]) + "_0-15"
