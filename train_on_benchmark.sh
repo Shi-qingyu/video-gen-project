@@ -42,7 +42,7 @@ for DATASET_SUBDIR in "$BASE_DATA_DIR"/*/; do
         mkdir -p "$OUTPUT_PATH"
 
         # Execute the training command
-        accelerate launch --config_file configs/accelerate_config_machine_single.yaml --main_process_port 8002 --multi_gpu \
+        accelerate launch --config_file configs/accelerate_config_machine_single.yaml --main_process_port 8001 --multi_gpu \
             train_conv1d.py \
             --gradient_checkpointing \
             --use_8bit_adam  \
@@ -50,6 +50,7 @@ for DATASET_SUBDIR in "$BASE_DATA_DIR"/*/; do
             --enable_tiling \
             --enable_slicing \
             --rank 128 \
+            --kernel 3 \
             --version skipconv1d \
             --instance_data_root $DATASET_PATH \
             --caption_column prompts.txt \

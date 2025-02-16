@@ -16,10 +16,11 @@
 import argparse
 import logging
 import math
+import copy
 import os
 import shutil
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Dict, Any
 from PIL import Image
 from PIL.ImageOps import exif_transpose
 
@@ -33,22 +34,26 @@ from peft import LoraConfig, get_peft_model_state_dict, set_peft_model_state_dic
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from tqdm.auto import tqdm
-from transformers import AutoTokenizer, T5EncoderModel, T5Tokenizer
+from transformers import CLIPTextModel, CLIPTokenizer, LlamaModel, LlamaTokenizerFast
 
 import diffusers
-from diffusers import AutoencoderKLCogVideoX, CogVideoXDPMScheduler, CogVideoXPipeline, CogVideoXTransformer3DModel
+from diffusers.models import AutoencoderKLHunyuanVideo, HunyuanVideoTransformer3DModel
+from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
+from diffusers.video_processor import VideoProcessor
+
 from diffusers.models.embeddings import get_3d_rotary_pos_embed
 from diffusers.optimization import get_scheduler
 from diffusers.pipelines.cogvideo.pipeline_cogvideox import get_resize_crop_region_for_grid
 from diffusers.training_utils import (
     cast_training_params,
+    compute_loss_weighting_for_sd3,
+    compute_density_for_timestep_sampling
 )
-from diffusers.utils import check_min_version, convert_unet_state_dict_to_peft, export_to_video, is_wandb_available
-from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_card
+from diffusers.utils import check_min_version, is_wandb_available
 from diffusers.utils.torch_utils import is_compiled_module
 
-from src.new.attention_processor import SkipConv1dCogVideoXAttnProcessor2_0
-from utils import high_frequency_filter, read_mask_from_dir
+from src.new.attention_processor import SkipConv1dHunyuanVideoAttnProcessor2_0
+from utils import high_frequency_filter
 
 if is_wandb_available():
     import wandb
@@ -57,6 +62,20 @@ if is_wandb_available():
 check_min_version("0.31.0.dev0")
 
 logger = get_logger(__name__)
+
+
+DEFAULT_PROMPT_TEMPLATE = {
+    "template": (
+        "<|start_header_id|>system<|end_header_id|>\n\nDescribe the video by detailing the following aspects: "
+        "1. The main content and theme of the video."
+        "2. The color, shape, size, texture, quantity, text, and spatial relationships of the objects."
+        "3. Actions, events, behaviors temporal relationships, physical movement changes of the objects."
+        "4. background environment, light, style and atmosphere."
+        "5. camera angles, movements, and transitions used in the video:<|eot_id|>"
+        "<|start_header_id|>user<|end_header_id|>\n\n{}<|eot_id|>"
+    ),
+    "crop_start": 95,
+}
 
 
 def get_args():
@@ -196,6 +215,25 @@ def get_args():
         type=str,
         default="skipconv1d",
         help=("The version of temporal conv1d."),
+    )
+    parser.add_argument(
+        "--weighting_scheme",
+        type=str,
+        default="none",
+        choices=["sigma_sqrt", "logit_normal", "mode", "cosmap", "none"],
+        help=('We default to the "none" weighting scheme for uniform sampling and uniform loss'),
+    )
+    parser.add_argument(
+        "--logit_mean", type=float, default=0.0, help="mean to use when using the `'logit_normal'` weighting scheme."
+    )
+    parser.add_argument(
+        "--logit_std", type=float, default=1.0, help="std to use when using the `'logit_normal'` weighting scheme."
+    )
+    parser.add_argument(
+        "--mode_scale",
+        type=float,
+        default=1.29,
+        help="Scale of mode weighting scheme. Only effective when using the `'mode'` as the `weighting_scheme`.",
     )
     parser.add_argument(
         "--mixed_precision",
@@ -595,156 +633,158 @@ class VideoDataset(Dataset):
         return videos, trajectories
 
 
-def log_validation(
-    pipe,
-    args,
-    accelerator,
-    pipeline_args,
-    epoch,
-    is_final_validation: bool = False,
-):
-    logger.info(
-        f"Running validation... \n Generating {args.num_validation_videos} videos with prompt: {pipeline_args['prompt']}."
-    )
-    # We train on the simplified learning objective. If we were previously predicting a variance, we need the scheduler to ignore it
-    scheduler_args = {}
-
-    if "variance_type" in pipe.scheduler.config:
-        variance_type = pipe.scheduler.config.variance_type
-
-        if variance_type in ["learned", "learned_range"]:
-            variance_type = "fixed_small"
-
-        scheduler_args["variance_type"] = variance_type
-
-    pipe.scheduler = CogVideoXDPMScheduler.from_config(pipe.scheduler.config, **scheduler_args)
-    pipe = pipe.to(accelerator.device)
-    # pipe.set_progress_bar_config(disable=True)
-
-    # run inference
-    generator = torch.Generator(device=accelerator.device).manual_seed(args.seed) if args.seed else None
-
-    videos = []
-    for _ in range(args.num_validation_videos):
-        video = pipe(**pipeline_args, generator=generator, output_type="np").frames[0]
-        videos.append(video)
-
-    for tracker in accelerator.trackers:
-        phase_name = "test" if is_final_validation else "validation"
-        if tracker.name == "wandb":
-            video_filenames = []
-            for i, video in enumerate(videos):
-                prompt = (
-                    pipeline_args["prompt"][:25]
-                    .replace(" ", "_")
-                    .replace(" ", "_")
-                    .replace("'", "_")
-                    .replace('"', "_")
-                    .replace("/", "_")
-                )
-                filename = os.path.join(args.output_dir, f"{phase_name}_video_{i}_{prompt}.mp4")
-                export_to_video(video, filename, fps=8)
-                video_filenames.append(filename)
-
-            tracker.log(
-                {
-                    phase_name: [
-                        wandb.Video(filename, caption=f"{i}: {pipeline_args['prompt']}")
-                        for i, filename in enumerate(video_filenames)
-                    ]
-                }
-            )
-
-    return videos
-
-
-def _get_t5_prompt_embeds(
-    tokenizer: T5Tokenizer,
-    text_encoder: T5EncoderModel,
+def _get_clip_prompt_embeds(
+    tokenizer_2,
+    text_encoder_2,
     prompt: Union[str, List[str]],
     num_videos_per_prompt: int = 1,
-    max_sequence_length: int = 226,
     device: Optional[torch.device] = None,
     dtype: Optional[torch.dtype] = None,
-    text_input_ids=None,
-):
+    max_sequence_length: int = 77,
+) -> torch.Tensor:
+    device = device or text_encoder_2.device
+    dtype = dtype or text_encoder_2.dtype
+
     prompt = [prompt] if isinstance(prompt, str) else prompt
     batch_size = len(prompt)
 
-    if tokenizer is not None:
-        text_inputs = tokenizer(
-            prompt,
-            padding="max_length",
-            max_length=max_sequence_length,
-            truncation=True,
-            add_special_tokens=True,
-            return_tensors="pt",
-        )
-        text_input_ids = text_inputs.input_ids
-    else:
-        if text_input_ids is None:
-            raise ValueError("`text_input_ids` must be provided when the tokenizer is not specified.")
+    text_inputs = tokenizer_2(
+        prompt,
+        padding="max_length",
+        max_length=max_sequence_length,
+        truncation=True,
+        return_tensors="pt",
+    )
 
-    prompt_embeds = text_encoder(text_input_ids.to(device))[0]
-    prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
+    text_input_ids = text_inputs.input_ids
+    untruncated_ids = tokenizer_2(prompt, padding="longest", return_tensors="pt").input_ids
+    if untruncated_ids.shape[-1] >= text_input_ids.shape[-1] and not torch.equal(text_input_ids, untruncated_ids):
+        removed_text = tokenizer_2.batch_decode(untruncated_ids[:, max_sequence_length - 1 : -1])
+        logger.warning(
+            "The following part of your input was truncated because CLIP can only handle sequences up to"
+            f" {max_sequence_length} tokens: {removed_text}"
+        )
+
+    prompt_embeds = text_encoder_2(text_input_ids.to(device), output_hidden_states=False).pooler_output
+
+    # duplicate text embeddings for each generation per prompt, using mps friendly method
+    prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt)
+    prompt_embeds = prompt_embeds.view(batch_size * num_videos_per_prompt, -1)
+
+    return prompt_embeds
+
+
+def _get_llama_prompt_embeds(
+    tokenizer,
+    text_encoder,
+    prompt: Union[str, List[str]],
+    prompt_template: Dict[str, Any],
+    num_videos_per_prompt: int = 1,
+    device: Optional[torch.device] = None,
+    dtype: Optional[torch.dtype] = None,
+    max_sequence_length: int = 256,
+    num_hidden_layers_to_skip: int = 2,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    device = device or text_encoder.device
+    dtype = dtype or text_encoder.dtype
+
+    prompt = [prompt] if isinstance(prompt, str) else prompt
+    batch_size = len(prompt)
+
+    prompt = [prompt_template["template"].format(p) for p in prompt]
+
+    crop_start = prompt_template.get("crop_start", None)
+    if crop_start is None:
+        prompt_template_input = tokenizer(
+            prompt_template["template"],
+            padding="max_length",
+            return_tensors="pt",
+            return_length=False,
+            return_overflowing_tokens=False,
+            return_attention_mask=False,
+        )
+        crop_start = prompt_template_input["input_ids"].shape[-1]
+        # Remove <|eot_id|> token and placeholder {}
+        crop_start -= 2
+
+    max_sequence_length += crop_start
+    text_inputs = tokenizer(
+        prompt,
+        max_length=max_sequence_length,
+        padding="max_length",
+        truncation=True,
+        return_tensors="pt",
+        return_length=False,
+        return_overflowing_tokens=False,
+        return_attention_mask=True,
+    )
+    text_input_ids = text_inputs.input_ids.to(device=device)
+    prompt_attention_mask = text_inputs.attention_mask.to(device=device)
+
+    prompt_embeds = text_encoder(
+        input_ids=text_input_ids,
+        attention_mask=prompt_attention_mask,
+        output_hidden_states=True,
+    ).hidden_states[-(num_hidden_layers_to_skip + 1)]
+    prompt_embeds = prompt_embeds.to(dtype=dtype)
+
+    if crop_start is not None and crop_start > 0:
+        prompt_embeds = prompt_embeds[:, crop_start:]
+        prompt_attention_mask = prompt_attention_mask[:, crop_start:]
 
     # duplicate text embeddings for each generation per prompt, using mps friendly method
     _, seq_len, _ = prompt_embeds.shape
     prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
     prompt_embeds = prompt_embeds.view(batch_size * num_videos_per_prompt, seq_len, -1)
+    prompt_attention_mask = prompt_attention_mask.repeat(1, num_videos_per_prompt)
+    prompt_attention_mask = prompt_attention_mask.view(batch_size * num_videos_per_prompt, seq_len)
 
-    return prompt_embeds
+    return prompt_embeds, prompt_attention_mask
 
 
 def encode_prompt(
-    tokenizer: T5Tokenizer,
-    text_encoder: T5EncoderModel,
+    tokenizer,
+    text_encoder,
+    tokenizer_2,
+    text_encoder_2,
     prompt: Union[str, List[str]],
+    prompt_2: Union[str, List[str]] = None,
+    prompt_template: Dict[str, Any] = DEFAULT_PROMPT_TEMPLATE,
     num_videos_per_prompt: int = 1,
-    max_sequence_length: int = 226,
+    prompt_embeds: Optional[torch.Tensor] = None,
+    pooled_prompt_embeds: Optional[torch.Tensor] = None,
+    prompt_attention_mask: Optional[torch.Tensor] = None,
     device: Optional[torch.device] = None,
     dtype: Optional[torch.dtype] = None,
-    text_input_ids=None,
+    max_sequence_length: int = 256,
 ):
-    prompt = [prompt] if isinstance(prompt, str) else prompt
-    prompt_embeds = _get_t5_prompt_embeds(
-        tokenizer,
-        text_encoder,
-        prompt=prompt,
-        num_videos_per_prompt=num_videos_per_prompt,
-        max_sequence_length=max_sequence_length,
-        device=device,
-        dtype=dtype,
-        text_input_ids=text_input_ids,
-    )
-    return prompt_embeds
-
-
-def compute_prompt_embeddings(
-    tokenizer, text_encoder, prompt, max_sequence_length, device, dtype, requires_grad: bool = False
-):
-    if requires_grad:
-        prompt_embeds = encode_prompt(
-            tokenizer,
-            text_encoder,
-            prompt,
-            num_videos_per_prompt=1,
-            max_sequence_length=max_sequence_length,
-            device=device,
-            dtype=dtype,
-        )
-    else:
-        with torch.no_grad():
-            prompt_embeds = encode_prompt(
+    with torch.no_grad():
+        if prompt_embeds is None:
+            prompt_embeds, prompt_attention_mask = _get_llama_prompt_embeds(
                 tokenizer,
                 text_encoder,
                 prompt,
-                num_videos_per_prompt=1,
-                max_sequence_length=max_sequence_length,
+                prompt_template,
+                num_videos_per_prompt,
                 device=device,
                 dtype=dtype,
+                max_sequence_length=max_sequence_length,
             )
-    return prompt_embeds
+
+        if pooled_prompt_embeds is None:
+            if prompt_2 is None and pooled_prompt_embeds is None:
+                prompt_2 = prompt
+            pooled_prompt_embeds = _get_clip_prompt_embeds(
+                tokenizer_2,
+                text_encoder_2,
+                prompt,
+                num_videos_per_prompt,
+                device=device,
+                dtype=dtype,
+                max_sequence_length=77,
+            )
+
+    return prompt_embeds, pooled_prompt_embeds, prompt_attention_mask
 
 
 def prepare_rotary_positional_embeddings(
@@ -964,15 +1004,23 @@ def main(args):
         )
 
     # Prepare models and scheduler
-    tokenizer = AutoTokenizer.from_pretrained(
+    tokenizer = LlamaTokenizerFast.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="tokenizer", revision=args.revision
     )
 
-    text_encoder = T5EncoderModel.from_pretrained(
+    text_encoder = LlamaModel.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision
     )
 
-    vae = AutoencoderKLCogVideoX.from_pretrained(
+    tokenizer_2 = CLIPTokenizer.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="tokenizer_2", revision=args.revision
+    )
+
+    text_encoder_2 = CLIPTextModel.from_pretrained(
+        args.pretrained_model_name_or_path, subfolder="text_encoder_2", revision=args.revision
+    )
+
+    vae = AutoencoderKLHunyuanVideo.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision, variant=args.variant
     )
 
@@ -981,12 +1029,13 @@ def main(args):
     if args.enable_tiling:
         vae.enable_tiling()
 
-    scheduler = CogVideoXDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
+    noise_scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
+    noise_scheduler_copy = copy.deepcopy(noise_scheduler)
 
     # CogVideoX-2b weights are stored in float16
     # CogVideoX-5b and CogVideoX-5b-I2V weights are stored in bfloat16
-    load_dtype = torch.bfloat16 if "5b" in args.pretrained_model_name_or_path.lower() else torch.float16
-    transformer = CogVideoXTransformer3DModel.from_pretrained(
+    load_dtype = torch.bfloat16
+    transformer = HunyuanVideoTransformer3DModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="transformer",
         torch_dtype=load_dtype,
@@ -996,30 +1045,37 @@ def main(args):
 
     # We only train the additional adapter LoRA layers
     text_encoder.requires_grad_(False)
+    text_encoder_2.requires_grad_(False)
     transformer.requires_grad_(False)
     vae.requires_grad_(False)
 
     text_encoder.to(accelerator.device, dtype=weight_dtype)
+    text_encoder_2.to(accelerator.device, dtype=weight_dtype)
     transformer.to(accelerator.device, dtype=weight_dtype)
     vae.to(accelerator.device, dtype=weight_dtype)
 
-    height = transformer.config.sample_height // transformer.config.patch_size
-    width = transformer.config.sample_width // transformer.config.patch_size
-    frames = transformer.config.sample_frames // transformer.config.temporal_compression_ratio + 1
+    height = args.height // vae.spatial_compression_ratio // transformer.config.patch_size
+    width = args.width // vae.spatial_compression_ratio // transformer.config.patch_size
+    frames = args.max_num_frames // vae.temporal_compression_ratio + 1
     dim = transformer.config.num_attention_heads * transformer.config.attention_head_dim
+    num_layers = transformer.config.num_layers + transformer.config.num_single_layers
 
     if args.version == "skipconv1d":
-        attn_processor_type = SkipConv1dCogVideoXAttnProcessor2_0
+        attn_processor_type = SkipConv1dHunyuanVideoAttnProcessor2_0
     else:
         raise ValueError(f"Unexpected version: {args.version}")
 
     attn_processors = {}
     for key, value in transformer.attn_processors.items():
-        block_idx = int(key.split(".")[1])
+        if "token_refiner" in key:
+            attn_processors[key] = value
+            continue
 
-        if block_idx in list(range(42)):
+        block_idx = int(key.split(".")[-3])
+
+        if block_idx in list(range(num_layers)):
             attn_processor = attn_processor_type(
-                height=height, width=width, frames=frames, dim=dim, rank=args.rank
+                height=height, width=width, frames=frames, dim=dim, rank=args.rank, kernel_size=args.kernel_size
             ).to(accelerator.device, dtype=weight_dtype)
             for param in attn_processor.parameters():
                 param.requires_grad_(True)
@@ -1030,7 +1086,7 @@ def main(args):
     transformer.set_attn_processor(attn_processors)
 
     if args.gradient_checkpointing:
-        transformer.enable_gradient_checkpointing()
+        transformer.gradient_checkpointing = True
 
     def unwrap_model(model):
         model = accelerator.unwrap_model(model)
@@ -1041,7 +1097,7 @@ def main(args):
     def save_model_hook(models, weights, output_dir):
         if accelerator.is_main_process:
             for model in models:
-                if isinstance(unwrap_model(model), CogVideoXTransformer3DModel):
+                if isinstance(unwrap_model(model), HunyuanVideoTransformer3DModel):
                     save_path = os.path.join(output_dir, "motion_embedding.pth")
                     embedding_state_dict = {}
                     for name, param in model.state_dict().items():
@@ -1056,7 +1112,7 @@ def main(args):
     def encode_video(video):
         video = video.to(accelerator.device, dtype=vae.dtype).unsqueeze(0)  # [1, F, C, H, W]
         video = video.permute(0, 2, 1, 3, 4)  # [1, C, F, H, W]
-        latent_dist = vae.encode(video).latent_dist
+        latent_dist = vae.encode(video).latent_dist # [1, c, f, h, w]
         return latent_dist
 
     train_dataset.instance_videos = [encode_video(video) for video in train_dataset.instance_videos]
@@ -1162,7 +1218,7 @@ def main(args):
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        tracker_name = args.tracker_name or "cogvideox-lora"
+        tracker_name = args.tracker_name
         accelerator.init_trackers(tracker_name, config=vars(args))
 
     # Train!
@@ -1189,10 +1245,17 @@ def main(args):
         # Only show the progress bar once on each machine.
         disable=not accelerator.is_local_main_process,
     )
-    vae_scale_factor_spatial = 2 ** (len(vae.config.block_out_channels) - 1)
 
-    # For DeepSpeed training
-    model_config = transformer.module.config if hasattr(transformer, "module") else transformer.config
+    def get_sigmas(timesteps, n_dim=4, dtype=torch.float32):
+        sigmas = noise_scheduler_copy.sigmas.to(device=accelerator.device, dtype=dtype)
+        schedule_timesteps = noise_scheduler_copy.timesteps.to(accelerator.device)
+        timesteps = timesteps.to(accelerator.device)
+        step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
+
+        sigma = sigmas[step_indices].flatten()
+        while len(sigma.shape) < n_dim:
+            sigma = sigma.unsqueeze(-1)
+        return sigma
 
     for epoch in range(first_epoch, args.num_train_epochs):
         transformer.train()
@@ -1201,78 +1264,80 @@ def main(args):
             models_to_accumulate = [transformer]
 
             with accelerator.accumulate(models_to_accumulate):
-                model_input = batch["videos"].permute(0, 2, 1, 3, 4).to(dtype=weight_dtype)  # [B, F, C, H, W]
-                # trajectories = batch["trajectories"].to(accelerator.device) # [B, F, N, 2]
-                # local_trajectories = batch["local_trajectories"].to(accelerator.device) # [B, F, N', 2]
-                # masks = batch["masks"].to(accelerator.device)  # [B, F, H, W]
+                model_input = batch["videos"].to(dtype=weight_dtype)  # [B, C, F, H, W]
+                # trajectories = batch["trajectories"].to(accelerator.device) # [B, F, N, 3(h w visible)]
                 prompts = batch["prompts"]
 
                 # encode prompts
-                prompt_embeds = compute_prompt_embeddings(
+                prompt_embeds, pooled_prompt_embeds, prompt_attention_mask = encode_prompt(
                     tokenizer,
                     text_encoder,
-                    prompts,
-                    model_config.max_text_seq_length,
-                    accelerator.device,
-                    weight_dtype,
-                    requires_grad=False,
+                    tokenizer_2,
+                    text_encoder_2,
+                    prompt=prompts,
+                    prompt_template=DEFAULT_PROMPT_TEMPLATE,
+                    max_sequence_length=256,
+                    device=accelerator.device,
+                    dtype=weight_dtype,
                 )
+
+                prompt_embeds = prompt_embeds.to(weight_dtype)
+                prompt_attention_mask = prompt_attention_mask.to(weight_dtype)
+                if pooled_prompt_embeds is not None:
+                    pooled_prompt_embeds = pooled_prompt_embeds.to(weight_dtype)
 
                 # Sample noise that will be added to the latents
                 noise = torch.randn_like(model_input)
-                batch_size, num_frames, num_channels, height, width = model_input.shape # [B, F, C, H, W]
+                batch_size, num_channels, num_frames, height, width = model_input.shape # [B, C, F, H, W]
 
                 # Sample a random timestep for each image
-                timesteps = torch.randint(
-                    0, scheduler.config.num_train_timesteps, (batch_size,), device=model_input.device
+                # for weighting schemes where we sample timesteps non-uniformly
+                u = compute_density_for_timestep_sampling(
+                    weighting_scheme=args.weighting_scheme,
+                    batch_size=batch_size,
+                    logit_mean=args.logit_mean,
+                    logit_std=args.logit_std,
+                    mode_scale=args.mode_scale,
                 )
-                timesteps = timesteps.long()
+                indices = (u * noise_scheduler_copy.config.num_train_timesteps).long()
+                timesteps = noise_scheduler_copy.timesteps[indices].to(device=model_input.device)
 
-                # Prepare rotary embeds
-                image_rotary_emb = (
-                    prepare_rotary_positional_embeddings(
-                        height=args.height,
-                        width=args.width,
-                        num_frames=num_frames,
-                        vae_scale_factor_spatial=vae_scale_factor_spatial,
-                        patch_size=model_config.patch_size,
-                        attention_head_dim=model_config.attention_head_dim,
-                        device=accelerator.device,
-                    )
-                    if model_config.use_rotary_positional_embeddings
-                    else None
-                )
+                guidance = torch.tensor([6.0] * model_input.shape[0], dtype=weight_dtype, device=model_input.device)
 
                 # Add noise to the model input according to the noise magnitude at each timestep
                 # (this is the forward diffusion process)
-                noisy_model_input = scheduler.add_noise(model_input, noise, timesteps)
+                sigmas = get_sigmas(timesteps, n_dim=model_input.ndim, dtype=model_input.dtype)
+                noisy_model_input = (1.0 - sigmas) * model_input + sigmas * noise
 
                 # Predict the noise residual
-                model_output = transformer(
-                    hidden_states=noisy_model_input,    # [B, F, C, H, W]
-                    encoder_hidden_states=prompt_embeds,
+                model_pred = transformer(
+                    hidden_states=noisy_model_input,    # [B, C, F, H, W]
                     timestep=timesteps,
-                    image_rotary_emb=image_rotary_emb,
+                    encoder_hidden_states=prompt_embeds,
+                    encoder_attention_mask=prompt_attention_mask,
+                    pooled_projections=pooled_prompt_embeds,
+                    guidance=guidance,
+                    attention_kwargs={},
                     return_dict=False,
                 )[0]
-                model_pred = scheduler.get_velocity(model_output, noisy_model_input, timesteps) # [B, F, C, H, W]
 
-                alphas_cumprod = scheduler.alphas_cumprod[timesteps]
-                weights = 1 / (1 - alphas_cumprod)
-                while len(weights.shape) < len(model_pred.shape):
-                    weights = weights.unsqueeze(-1)
+                weighting = compute_loss_weighting_for_sd3(weighting_scheme=args.weighting_scheme, sigmas=sigmas)
 
-                target = model_input
+                target = noise - model_input
 
-                loss = torch.mean((weights * (model_pred - target) ** 2).reshape(batch_size, -1), dim=1)
-                loss = args.mse_weight * loss.mean()
+                # Compute regular loss.
+                loss = torch.mean(
+                    (weighting.float() * (model_pred.float() - target.float()) ** 2).reshape(target.shape[0], -1),
+                    1,
+                )
+                loss = loss.mean()
 
                 if timesteps <= 400:
                     if args.tracking_loss:
                         frame_ids = torch.linspace(0, trajectories.size(1) - 1, num_frames).to(torch.int32)
                         trajectories = trajectories[:, frame_ids]
                         batch_size, _, num_trajectories, _ = trajectories.shape
-                        model_pred_ = model_pred.permute(0, 1, 3, 4, 2)  # [B, F, H, W, C]
+                        model_pred_ = model_pred.permute(0, 2, 3, 4, 1)  # [B, F, H, W, C]
                         batch_ids = torch.arange(batch_size)[:, None, None].repeat(1, num_trajectories, num_frames).to(accelerator.device)
                         frame_ids = torch.arange(num_frames)[None, None, :].repeat(batch_size, num_trajectories, 1).to(accelerator.device)
                         h_coor = trajectories[:, :, :, 1].transpose(1, 2).to(accelerator.device) * height
@@ -1296,7 +1361,7 @@ def main(args):
                         hf_target = high_frequency_filter(target)
                         hf_model_pred = high_frequency_filter(model_pred)
                         
-                        hf_loss = torch.mean((weights * (hf_target - hf_model_pred) ** 2).reshape(batch_size, -1), dim=1)
+                        hf_loss = torch.mean((weighting.float() * (hf_target - hf_model_pred) ** 2).reshape(batch_size, -1), dim=1)
                         hf_loss = hf_loss.mean()
                         loss = loss + args.high_frequency_loss_weight * hf_loss
 
@@ -1350,64 +1415,7 @@ def main(args):
             if global_step >= args.max_train_steps:
                 break
 
-        if accelerator.is_main_process:
-            if args.validation_prompt is not None and (epoch + 1) % args.validation_epochs == 0:
-                # Create pipeline
-                pipe = CogVideoXPipeline.from_pretrained(
-                    args.pretrained_model_name_or_path,
-                    transformer=unwrap_model(transformer),
-                    text_encoder=unwrap_model(text_encoder),
-                    vae=unwrap_model(vae),
-                    scheduler=scheduler,
-                    revision=args.revision,
-                    variant=args.variant,
-                    torch_dtype=weight_dtype,
-                )
-
-                validation_prompts = args.validation_prompt.split(args.validation_prompt_separator)
-                for validation_prompt in validation_prompts:
-                    pipeline_args = {
-                        "prompt": validation_prompt,
-                        "guidance_scale": args.guidance_scale,
-                        "use_dynamic_cfg": args.use_dynamic_cfg,
-                        "height": args.height,
-                        "width": args.width,
-                    }
-
-                    validation_outputs = log_validation(
-                        pipe=pipe,
-                        args=args,
-                        accelerator=accelerator,
-                        pipeline_args=pipeline_args,
-                        epoch=epoch,
-                    )
-
-    # Save the lora layers
     accelerator.wait_for_everyone()
-    if accelerator.is_main_process:
-        # Run inference
-        validation_outputs = []
-        if args.validation_prompt and args.num_validation_videos > 0:
-            validation_prompts = args.validation_prompt.split(args.validation_prompt_separator)
-            for validation_prompt in validation_prompts:
-                pipeline_args = {
-                    "prompt": validation_prompt,
-                    "guidance_scale": args.guidance_scale,
-                    "use_dynamic_cfg": args.use_dynamic_cfg,
-                    "height": args.height,
-                    "width": args.width,
-                }
-
-                video = log_validation(
-                    pipe=pipe,
-                    args=args,
-                    accelerator=accelerator,
-                    pipeline_args=pipeline_args,
-                    epoch=epoch,
-                    is_final_validation=True,
-                )
-                validation_outputs.extend(video)
-
     accelerator.end_training()
 
 
