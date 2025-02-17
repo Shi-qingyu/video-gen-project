@@ -7,21 +7,21 @@ from diffusers.utils import export_to_video
 from src.new.attention_processor import SkipConv1dHunyuanVideoAttnProcessor2_0
 
 
-device = "cuda:3"
+device = "cuda"
 
 prompt = "An astronaut is dancing on mars."
 
-ckpt_path = "checkpoints/lr_5e-6_skipconv1d_kernel_3_mid_128_res_512x768_mse_1.0_hunyuan_dance-twirl/checkpoint-500/motion_embedding.pth"
+ckpt_path = "checkpoints/lr_6e-6_skipconv1d_kernel_3_mid_128_mse_1.0_hunyuan_dance-twirl/checkpoint-400/motion_embedding.pth"
 rank = 128
 kernel_size = 3
 
 version = "skipconv1d"
-video_height = 512
-video_width = 768
+video_height = 480
+video_width = 720
 max_num_frames = 49
 seed=42
 
-config = "_".join(ckpt_path.split("/")[1: 3]) + "_50"
+config = "_".join(ckpt_path.split("/")[1: 3]) + "_30" + "_dual"
 
 model_id = "hunyuanvideo-community/HunyuanVideo"
 
@@ -41,7 +41,7 @@ else:
 
 attn_processors = {}
 for key, value in transformer.attn_processors.items():
-    if "token_refiner" in key or "single" not in key:
+    if "token_refiner" in key or "single" in key:
         attn_processors[key] = value
         continue
 
@@ -69,7 +69,7 @@ output = pipe(
     height=video_height,
     width=video_width,
     num_frames=max_num_frames,
-    num_inference_steps=50,
+    num_inference_steps=30,
     generator=torch.Generator(device=device).manual_seed(seed),
 ).frames[0]
 

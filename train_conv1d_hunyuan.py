@@ -1067,7 +1067,7 @@ def main(args):
 
     attn_processors = {}
     for key, value in transformer.attn_processors.items():
-        if "token_refiner" in key or "single" not in key:
+        if "token_refiner" in key:
             attn_processors[key] = value
             continue
 
