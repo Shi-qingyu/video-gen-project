@@ -431,11 +431,11 @@ def get_args():
         help="Coefficients for computing the Prodigy optimizer's stepsize using running averages. If set to None, uses the value of square root of beta2.",
     )
     parser.add_argument("--prodigy_decouple", action="store_true", help="Use AdamW style decoupled weight decay")
-    parser.add_argument("--adam_weight_decay", type=float, default=1e-04, help="Weight decay to use for unet params")
+    parser.add_argument("--adam_weight_decay", type=float, default=1e-4, help="Weight decay to use for unet params")
     parser.add_argument(
         "--adam_epsilon",
         type=float,
-        default=1e-08,
+        default=1e-8,
         help="Epsilon value for the Adam optimizer and Prodigy optimizers.",
     )
     parser.add_argument("--max_grad_norm", default=1.0, type=float, help="Max gradient norm.")
@@ -1067,7 +1067,7 @@ def main(args):
 
     attn_processors = {}
     for key, value in transformer.attn_processors.items():
-        if "token_refiner" in key:
+        if "token_refiner" in key or "single" not in key:
             attn_processors[key] = value
             continue
 
@@ -1305,7 +1305,6 @@ def main(args):
                 guidance = torch.tensor([6.0] * model_input.shape[0], dtype=weight_dtype, device=model_input.device)
 
                 # Add noise to the model input according to the noise magnitude at each timestep
-                # (this is the forward diffusion process)
                 sigmas = get_sigmas(timesteps, n_dim=model_input.ndim, dtype=model_input.dtype)
                 noisy_model_input = (1.0 - sigmas) * model_input + sigmas * noise
 

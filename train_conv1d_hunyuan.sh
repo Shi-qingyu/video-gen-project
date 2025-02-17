@@ -1,13 +1,13 @@
 #!/bin/bash
 export MODEL_PATH="hunyuanvideo-community/HunyuanVideo"
 export DATASET_PATH="data/dance-twirl"
-export OUTPUT_PATH="checkpoints/lr_1e-5_skipconv1d_kernel_3_mid_128_mse_1.0_hunyuan_dance-twirl"
+export OUTPUT_PATH="checkpoints/lr_5e-6_skipconv1d_kernel_3_mid_128_single_res_480x720_mse_1.0_hunyuan_dance-twirl"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 
 #  --use_8bit_adam is necessary for CogVideoX-5B-I2V
 # if you are not using wth 8 gus, change `accelerate_config_machine_single.yaml` num_processes as your gpu number
-accelerate launch --config_file configs/accelerate_config_machine_single.yaml --main_process_port 8002 --multi_gpu \
+accelerate launch --config_file configs/accelerate_config_machine_single.yaml --main_process_port 8000 --multi_gpu \
   train_conv1d_hunyuan.py \
   --gradient_checkpointing \
   --use_8bit_adam  \
@@ -33,8 +33,10 @@ accelerate launch --config_file configs/accelerate_config_machine_single.yaml --
   --max_train_steps 500 \
   --checkpointing_steps 100 \
   --resume_from_checkpoint "" \
-  --gradient_accumulation_steps 4 \
-  --learning_rate 1e-5 \
+  --gradient_accumulation_steps 1 \
+  --learning_rate 5e-6 \
+  --lr_scheduler constant_with_warmup \
+  --lr_warmup_steps 100 \
   --optimizer AdamW \
   --adam_beta1 0.9 \
   --adam_beta2 0.95 \
