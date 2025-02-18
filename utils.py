@@ -374,5 +374,10 @@ def read_mask_from_dir(image_folder, target_shape):
     return masks_tensor
 
 if __name__ == "__main__":
-    video_to_frames("data/dog-agility/videos/dog-agility.mp4")
-            
+    root = Path("outputs_benchmark")
+    for dir in root.iterdir():
+        name = dir.name
+        while name.endswith(".") or name.endswith("_"):
+            name = name[:-1]
+        new_path = dir.parent.joinpath(name)
+        dir.rename(new_path)        

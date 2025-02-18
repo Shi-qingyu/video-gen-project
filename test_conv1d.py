@@ -4,13 +4,13 @@ import torch
 from diffusers import CogVideoXPipeline
 from diffusers.utils import export_to_video
 
-from src.new.attention_processor import SkipConv1dCogVideoXAttnProcessor2_0
+from src.new.attention_processor import SkipConv1dCogVideoXAttnProcessor2_0, AttentionConv1dCogVideoXAttnProcessor2_0, KVConv1dCogVideoXAttnProcessor2_0
 
 
-prompt = "A tiger is walking in the forest."
+prompt = "A monkey is dancing hip-hop on the grassland."
 seed = 42
 device = "cuda"
-ckpt_path = "checkpoints/lr_1e-5_skipconv1d_mid_128_mse_1.0_bear/checkpoint-300/motion_embedding.pth"
+ckpt_path = "checkpoints/lr_1e-5_attentionconv1d_mid_128_kernel_3_mse_1.0_breakdance/checkpoint-500/motion_embedding.pth"
 rank = 128
 
 config = "_".join(ckpt_path.split("/")[1: 3]) + "_0-15"
@@ -31,8 +31,14 @@ attn_processors = {}
 for key, value in transformer.attn_processors.items():
     block_idx = int(key.split(".")[1])
     if block_idx in list(range(0, 15)):
-        attn_processor = SkipConv1dCogVideoXAttnProcessor2_0(
-            height=height, width=width, frames=frames, dim=dim, rank=rank
+        attn_processor = AttentionConv1dCogVideoXAttnProcessor2_0(
+            height=height, 
+            width=width, 
+            frames=frames, 
+            dim=dim, 
+            rank=rank,
+            kernel_size=3,
+            module_type="conv1d",
         ).to(dtype=transformer.dtype)
         attn_processors[key] = attn_processor
     else:

@@ -47,7 +47,7 @@ from diffusers.utils import check_min_version, convert_unet_state_dict_to_peft, 
 from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_card
 from diffusers.utils.torch_utils import is_compiled_module
 
-from src.new.attention_processor import SkipConv1dCogVideoXAttnProcessor2_0
+from src.new.attention_processor import SkipConv1dCogVideoXAttnProcessor2_0, AttentionConv1dCogVideoXAttnProcessor2_0, KVConv1dCogVideoXAttnProcessor2_0
 from utils import high_frequency_filter, read_mask_from_dir
 
 if is_wandb_available():
@@ -195,6 +195,12 @@ def get_args():
         "--version",
         type=str,
         default="skipconv1d",
+        help=("The version of temporal conv1d."),
+    )
+    parser.add_argument(
+        "--module_type",
+        type=str,
+        default="conv1d",
         help=("The version of temporal conv1d."),
     )
     parser.add_argument(
@@ -1010,6 +1016,10 @@ def main(args):
 
     if args.version == "skipconv1d":
         attn_processor_type = SkipConv1dCogVideoXAttnProcessor2_0
+    elif args.version == "attentionconv1d":
+        attn_processor_type = AttentionConv1dCogVideoXAttnProcessor2_0
+    elif args.version == "kvconv1d":
+        attn_processor_type = KVConv1dCogVideoXAttnProcessor2_0
     else:
         raise ValueError(f"Unexpected version: {args.version}")
 
@@ -1017,9 +1027,15 @@ def main(args):
     for key, value in transformer.attn_processors.items():
         block_idx = int(key.split(".")[1])
 
-        if block_idx in list(range(42)):
+        if block_idx in list(range(transformer.config.num_layers)):
             attn_processor = attn_processor_type(
-                height=height, width=width, frames=frames, dim=dim, rank=args.rank
+                height=height, 
+                width=width, 
+                frames=frames, 
+                dim=dim, 
+                rank=args.rank,
+                kernel_size=args.kernel_size,
+                module_type=args.module_type,
             ).to(accelerator.device, dtype=weight_dtype)
             for param in attn_processor.parameters():
                 param.requires_grad_(True)

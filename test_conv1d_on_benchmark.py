@@ -53,6 +53,9 @@ for subfolder in os.listdir(ROOT):
         prompts = file.read().splitlines()
 
     for prompt in prompts:
+        while prompt.endswith(" "):
+            prompt = prompt[:-1]
+            
         video = pipe(
             prompt=prompt,
             num_videos_per_prompt=1,
