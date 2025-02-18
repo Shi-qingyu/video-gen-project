@@ -10,10 +10,10 @@ from src.new.attention_processor import SkipConv1dCogVideoXAttnProcessor2_0, Att
 prompt = "An astronaut is dancing on mars."
 seed = 42
 device = "cuda"
-ckpt_path = "checkpoints/lr_1e-5_skipconv1d_mlp_mid_128_kernel_3_mse_1.0_dance-twirl/checkpoint-500/motion_embedding.pth"
+ckpt_path = "checkpoints/lr_1e-5_attentionconv1d_conv1d_mid_128_kernel_3_mse_1.0_dance-twirl/checkpoint-500/motion_embedding.pth"
 rank = 128
 kernel_size = 3
-module_type = "mlp"
+module_type = "conv1d"
 
 config = "_".join(ckpt_path.split("/")[1: 3]) + "_0-15"
 case = ckpt_path.split("/")[1].split("_")[-1]
@@ -33,7 +33,7 @@ attn_processors = {}
 for key, value in transformer.attn_processors.items():
     block_idx = int(key.split(".")[1])
     if block_idx in list(range(0, 15)):
-        attn_processor = SkipConv1dCogVideoXAttnProcessor2_0(
+        attn_processor = AttentionConv1dCogVideoXAttnProcessor2_0(
             height=height, 
             width=width, 
             frames=frames, 

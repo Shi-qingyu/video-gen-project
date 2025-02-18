@@ -1,7 +1,7 @@
 #!/bin/bash
 export MODEL_PATH="THUDM/CogVideoX-5b"
 export DATASET_PATH="data/dance-twirl"
-export OUTPUT_PATH="checkpoints/lr_1e-5_skipconv1d_mlp_mid_128_kernel_3_mse_1.0_dance-twirl"
+export OUTPUT_PATH="checkpoints/lr_1e-5_attentionconv1d_conv1d_mid_128_kernel_3_mse_1.0_dance-twirl"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 
@@ -16,8 +16,8 @@ accelerate launch --config_file configs/accelerate_config_machine_single.yaml --
   --enable_slicing \
   --rank 128 \
   --kernel_size 3 \
-  --version skipconv1d \
-  --module_type mlp \
+  --version attentionconv1d \
+  --module_type conv1d \
   --instance_data_root $DATASET_PATH \
   --caption_column prompts.txt \
   --video_column videos.txt \

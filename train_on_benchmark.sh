@@ -28,7 +28,7 @@ for DATASET_SUBDIR in "$BASE_DATA_DIR"/*/; do
         DATASET_PATH="$BASE_DATA_DIR/$DATASET_NAME"
 
         # Define the OUTPUT_PATH based on the dataset name
-        OUTPUT_PATH="$BASE_OUTPUT_DIR/lr_1e-5_skipconv1d_kernel_5_mid_128_mse_1.0_$DATASET_NAME"
+        OUTPUT_PATH="$BASE_OUTPUT_DIR/lr_1e-5_attentionconv1d_conv1d_kernel_5_mid_128_mse_1.0_$DATASET_NAME"
 
         # Export the environment variables for the current iteration
         export DATASET_PATH
@@ -42,7 +42,7 @@ for DATASET_SUBDIR in "$BASE_DATA_DIR"/*/; do
         mkdir -p "$OUTPUT_PATH"
 
         # Execute the training command
-        accelerate launch --config_file configs/accelerate_config_machine_single.yaml --main_process_port 8001 --multi_gpu \
+        accelerate launch --config_file configs/accelerate_config_machine_single.yaml --main_process_port 8000 --multi_gpu \
             train_conv1d.py \
             --gradient_checkpointing \
             --use_8bit_adam  \
@@ -51,7 +51,7 @@ for DATASET_SUBDIR in "$BASE_DATA_DIR"/*/; do
             --enable_slicing \
             --rank 128 \
             --kernel 5 \
-            --version skipconv1d \
+            --version attentionconv1d \
             --module_type conv1d \
             --instance_data_root $DATASET_PATH \
             --caption_column prompts.txt \
