@@ -11,7 +11,7 @@ device = "cuda"
 
 prompt = "An astronaut is dancing on mars."
 
-ckpt_path = "checkpoints/lr_6e-6_skipconv1d_kernel_3_mid_128_mse_1.0_hunyuan_dance-twirl/checkpoint-400/motion_embedding.pth"
+ckpt_path = "checkpoints/lr_2e-6_skipconv1d_kernel_3_mid_128_res_480x720_mse_1.0_hunyuan_dance-twirl/checkpoint-500/motion_embedding.pth"
 rank = 128
 kernel_size = 3
 
@@ -21,7 +21,7 @@ video_width = 720
 max_num_frames = 49
 seed=42
 
-config = "_".join(ckpt_path.split("/")[1: 3]) + "_30" + "_dual"
+config = "_".join(ckpt_path.split("/")[1: 3]) + "_30"
 
 model_id = "hunyuanvideo-community/HunyuanVideo"
 
@@ -41,7 +41,7 @@ else:
 
 attn_processors = {}
 for key, value in transformer.attn_processors.items():
-    if "token_refiner" in key or "single" in key:
+    if "token_refiner" in key:
         attn_processors[key] = value
         continue
 

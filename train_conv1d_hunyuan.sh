@@ -1,7 +1,7 @@
 #!/bin/bash
 export MODEL_PATH="hunyuanvideo-community/HunyuanVideo"
 export DATASET_PATH="data/dance-twirl"
-export OUTPUT_PATH="checkpoints/lr_6e-6_skipconv1d_kernel_3_mid_1286_res_480x720_mse_1.0_hunyuan_dance-twirl"
+export OUTPUT_PATH="checkpoints/lr_2e-6_skipconv1d_kernel_3_mid_128_res_480x720_mse_1.0_hunyuan_dance-twirl"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 
@@ -34,7 +34,7 @@ accelerate launch --config_file configs/accelerate_config_machine_single.yaml --
   --checkpointing_steps 100 \
   --resume_from_checkpoint "" \
   --gradient_accumulation_steps 4 \
-  --learning_rate 6e-6 \
+  --learning_rate 2e-6 \
   --lr_scheduler constant_with_warmup \
   --lr_warmup_steps 100 \
   --optimizer AdamW \

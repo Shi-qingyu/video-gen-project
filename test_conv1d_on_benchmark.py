@@ -6,7 +6,7 @@ from diffusers.utils import export_to_video
 
 from src.new.attention_processor import SkipConv1dCogVideoXAttnProcessor2_0
 
-ROOT = "MTBench_subset/MTBench_medium"
+ROOT = "MTBench_subset/MTBench_hard"
 SAVE = "outputs_benchmark"
 
 os.makedirs(SAVE, exist_ok=True)
