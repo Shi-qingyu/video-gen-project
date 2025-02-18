@@ -151,7 +151,7 @@ def motion_fidelity(data_root, gen_root, offline_cotracker_model_path, device="c
     cnt = 0
 
     for data in data_root.iterdir():
-        original_video_path = data.joinpath("videos", data.name+".mp4")
+        original_video_path = data.joinpath("videos", data.name + ".mp4")
 
         segm_mask = data.joinpath("masks", data.name, "00000.png")
         if segm_mask.is_file():
@@ -174,18 +174,25 @@ def motion_fidelity(data_root, gen_root, offline_cotracker_model_path, device="c
             eval_prompts = file.read().splitlines()
         
         for eval_prompt in eval_prompts:
+            while eval_prompt.endswith(" "):
+                eval_prompt = eval_prompt[:-1]
+
+            eval_prompt = eval_prompt.replace(" ", "_")
             video_dir = gen_root.joinpath(eval_prompt[:-1] if eval_prompt.endswith(".") else eval_prompt)
-            for gen_video_path in video_dir.iterdir():
-                if gen_video_path.is_file() and gen_video_path.suffix.endswith("mp4"):
-                    gen_tracklets = get_tracklets(model, gen_video_path, mask=box_mask)
-                    similarity_matrix = get_similarity_matrix(gen_tracklets, original_tracklets)
-                    similarity_scores_dict = get_score(similarity_matrix)
-                    score = similarity_scores_dict["average_score"]
-                    motion_fidelity_score += score
-                    cnt += 1
+
+            if video_dir.exists():
+                for gen_video_path in video_dir.iterdir():
+                    if gen_video_path.is_file() and gen_video_path.suffix.endswith("mp4"):
+                        gen_tracklets = get_tracklets(model, gen_video_path, mask=box_mask)
+                        similarity_matrix = get_similarity_matrix(gen_tracklets, original_tracklets)
+                        similarity_scores_dict = get_score(similarity_matrix)
+                        score = similarity_scores_dict["average_score"]
+                        motion_fidelity_score += score
+                        cnt += 1
         
     return motion_fidelity_score / cnt
 
 
 if __name__ == "__main__":
-    pass
+    # print(motion_fidelity("data", "outputs_benchmark", "../../track/co-tracker/checkpoints/scaled_offline.pth"))
+    print(clip_score("outputs_benchmark"))

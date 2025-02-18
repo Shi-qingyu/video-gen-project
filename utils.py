@@ -1,4 +1,5 @@
 import os
+import shutil
 from pathlib import Path
 import numpy as np
 import imageio
@@ -373,11 +374,54 @@ def read_mask_from_dir(image_folder, target_shape):
 
     return masks_tensor
 
+
+def evaluation_prompts():
+    root = Path("MTBench_subset")
+    res = {}
+
+    for sub_root in root.iterdir():
+        for case in sub_root.iterdir():
+            prompts_file = case.joinpath("prompts.txt")
+            eval_prompts_file = case.joinpath("eval_prompts.txt")
+
+            with open(prompts_file.as_posix(), "r") as file:
+                src_prompt = file.read().strip()
+            
+            with open(eval_prompts_file.as_posix(), "r") as file:
+                eval_prompts = file.read().splitlines()
+            
+            for i, eval_prompt in enumerate(eval_prompts):
+                while eval_prompt.endswith(" "):
+                    eval_prompt = eval_prompt[:-1]
+                
+                eval_prompts[i] = eval_prompt
+            
+            res[src_prompt] = eval_prompts
+    
+    with open("evaluation_prompts.json", "w") as file:
+        json.dump(res, file, indent=4)
+
+
+def organize_outputs():
+    src_root = Path("outputs_benchmark")
+
+    save_root = Path("organized_outputs")
+    save_root.mkdir(exist_ok=True)
+
+    with open("evaluation_prompts.json", "r") as file:
+        benchmark = json.load(file)
+
+    for src_prompt, eval_prompts in benchmark.items():
+        save_dir = save_root.joinpath(src_prompt[:-1].replace(" ", "_"))
+        save_dir.mkdir(exist_ok=True)
+        
+        for eval_prompt in eval_prompts:
+            dst_path = save_dir.joinpath(eval_prompt[:-1].replace(" ", "_"))
+            src_path = src_root.joinpath(eval_prompt[:-1].replace(" ", "_"))
+
+            shutil.copytree(src_path.as_posix(), dst_path.as_posix())
+
+
+
 if __name__ == "__main__":
-    root = Path("outputs_benchmark")
-    for dir in root.iterdir():
-        name = dir.name
-        while name.endswith(".") or name.endswith("_"):
-            name = name[:-1]
-        new_path = dir.parent.joinpath(name)
-        dir.rename(new_path)        
+    organize_outputs()  

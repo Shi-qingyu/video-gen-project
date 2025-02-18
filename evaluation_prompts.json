@@ -1,206 +1,212 @@
 {
-    "A race car drifts through an S-curve.": [
-      "A motorcycle drifts through an S-curve.",
-      "A bicycle drifts through an S-curve.",
-      "A truck drifts through an S-curve.",
-      "A tank drifts through an S-curve.",
-      "A skateboarder drifts through an S-curve."
+    "A dog running through a series of red and white poles.": [
+        "A cat running through a series of red and white cones.",
+        "A fox running through a series of red and white posts.",
+        "A horse running through a series of red and white fences.",
+        "A deer running through a series of red and white barriers.",
+        "A rabbit running through a series of red and white hurdles."
     ],
-    "A black swan is swimming in the pond.": [
-      "A white duck is swimming in the pond.",
-      "A graceful goose is swimming in the pond.",
-      "A cat is swimming in the pond.",
-      "A flamingo is swimming in the pond.",
-      "A bear is swimming in the pond."
+    "The person is dancing hip-hop on the ground.": [
+        "The robot is dancing hip-hop on the stage.",
+        "The astronaut is dancing hip-hop in the park.",
+        "The monkey is dancing hip-hop on the street.",
+        "The panda is dancing hip-hop at the party.",
+        "The gorilla is dancing hip-hop in the studio."
     ],
-    "A dog is weaving through the obstacles in an S-shaped pattern.": [
-      "A cat is weaving through the obstacles in an S-shaped pattern.",
-      "A horse is weaving through the obstacles in an S-shaped pattern.",
-      "A fox is weaving through the obstacles in an S-shaped pattern.",
-      "A rabbit is weaving through the obstacles in an S-shaped pattern.",
-      "A goat is weaving through the obstacles in an S-shaped pattern."
+    "The duck is walking on the grass near a river.": [
+        "A goose is walking on the grass near a pond.",
+        "A chicken is walking on the grass near a stream.",
+        "A peacock is walking on the grass near a lake.",
+        "A swan is walking on the grass near a marsh.",
+        "A turkey is walking on the grass near a creek."
     ],
-    "A person is preparing to take off with a paraglider.": [
-      "A dog is preparing to take off with a paraglider.",
-      "A woman is preparing to take off with a paraglider.",
-      "A chef is preparing to take off with a paraglider.",
-      "A monkey is preparing to take off with a paraglider.",
-      "A panda is preparing to take off with a paraglider."
+    "A woman riding a brown horse is jumping over a fence.": [
+        "A man riding a tiger is jumping over a fence.",
+        "A monkey riding a black horse is jumping over a stream.",
+        "A cowboy riding a lion is jumping over a barrier.",
+        "An astronaut on a gray horse is jumping over a gate.",
+        "A robot riding a brown horse is jumping over an obstacle."
     ],
-    "The cow is walking on the grassland.": [
-      "The sheep is walking on the grassland.",
-      "The goat is walking on the grassland.",
-      "The horse is walking on the grassland.",
-      "The buffalo is walking on the grassland.",
-      "The llama is walking on the grassland."
+    "A person is snowboarding down a snowy mountain slope.": [
+        "An astronaut is snowboarding down a snowy mountain slope.",
+        "A robot is snowboarding down a snowy mountain slope.",
+        "A monkey is snowboarding down a snowy mountain slope.",
+        "A Kung Fu Panda is snowboarding down a snowy mountain slope.",
+        "A chef is snowboarding down a snowy mountain slope."
     ],
-    "A motorbike is driving on the road.": [
-      "A bus is driving on the road.",
-      "A tank is driving on the road.",
-      "A plane is driving on the road.",
-      "A dirt bike is driving on the road.",
-      "A cruiser bike is driving on the road."
+    "A woman wearing blue dress is dancing on the ground.": [
+        "A robot is dancing on the stage.",
+        "An astronaut is dancing on mars.",
+        "A gorilla is dancing on the beach.",
+        "A Kung Fu Panda is dancing on the floor.",
+        "A chef is dancing on the grass."
     ],
-    "A rhino is walking on the sand.": [
-      "An elephant is walking on the sand.",
-      "A hippo is walking on the sand.",
-      "A llama is walking on the sand.",
-      "A gorilla is walking on the sand.",
-      "A zebra is walking on the sand."
+    "The person riding a white horse is jumping over a fence.": [
+        "A knight riding a tiger is jumping over a fence.",
+        "A monkey riding a black horse is jumping over a stream.",
+        "A cowboy riding a lion is jumping over a barrier.",
+        "An astronaut on a gray horse is jumping over a gate.",
+        "A robot riding a brown horse is jumping over an obstacle."
     ],
-    "A woman is walking on the road.": [
-      "A man is walking on the road.",
-      "A child is walking on the road.",
-      "A monkey is walking on the road.",
-      "A panda is walking on the road.",
-      "A joker is walking on the road."
+    "The person is riding a bicycle on a dirt track.": [
+        "The panda is riding a bicycle on a mountain trail.",
+        "A person is riding a horse on a beach path.",
+        "A gorilla is riding a bicycle on a city street.",
+        "The person is riding a goat on a rural road.",
+        "The person is riding a motorbike on a muddy course."
     ],
-    "A car is turning around on the road around the mountain.": [
-      "A truck is turning around on the road around the mountain.",
-      "A bus is turning around on the road around the mountain.",
-      "A motorbike is turning around on the road around the mountain.",
-      "A tank is turning around on the road around the mountain.",
-      "A lion is turning around on the road around the mountain."
+    "The person is dancing on the ground, wearing a colorful dress with a full skirt.": [
+        "The panda is dancing on the stage, wearing a vibrant sari with intricate embroidery.",
+        "A robot is dancing on the floor, wearing a flowing gown with delicate lace.",
+        "An astronaut  is dancing on the beach, wearing a bright tutu with sequined embellishments.",
+        "A chef is dancing on the lawn, wearing a festive kimono with wide sleeves.",
+        "A monkey is dancing on the plaza, wearing a radiant dress with layers of tulle."
     ],
-    "A man is dancing hip-hop on the floor.": [
-      "A woman is dancing hip-hop on the floor.",
-      "A child is dancing hip-hop on the floor.",
-      "A robot is dancing hip-hop on the floor.",
-      "A monkey is dancing hip-hop on the floor.",
-      "A panda is dancing hip-hop on the floor."
+    "The person is riding a bicycle on a path next to a colorful wall with graffiti.": [
+        "The tank is driving on a path next to a vibrant fence with murals.",
+        "A monkey is riding a bicycle on a trail next to a mural-covered wall in an urban park.",
+        "The panda is riding a bicycle on a path next to a painted wall with street art.",
+        "A person is riding a bear on a scenic route next to a wall adorned with graffiti.",
+        "The rider is riding a tiger on a pathway next to a colorful wall in a city alley."
     ],
-    "A bus is driving on the road.": [
-      "An elephant is walking on the road.",
-      "A tank is driving on the road.",
-      "A race car is driving on the road.",
-      "A rhino is walking on the road.",
-      "A lion is walking on the road."
+    "A woman is pushing a stroller down a street.": [
+        "A man is pushing a stroller through the park.",
+        "A nurse is pushing a wheelchair down a hospital corridor.",
+        "A mother is pushing a stroller along a beachfront promenade.",
+        "A jogger is pushing a stroller during an early morning run.",
+        "A caregiver is pushing a stroller past colorful storefronts."
     ],
-    "A bear is walking on the stone.": [
-      "A wolf is walking on the stone.",
-      "A lynx is walking on the stone.",
-      "A fox is walking on the stone.",
-      "A moose is walking on the stone.",
-      "A cougar is walking on the stone."
+    "A rhino walking through a rocky enclosure with trees and rocks in the background.": [
+        "A bison walking through a grassy enclosure with hills and shrubs in the background.",
+        "A zebra walking through a sandy enclosure with acacia trees and boulders in the background.",
+        "A lion walking through a fenced area with tall grass and scattered rocks in the background.",
+        "A deer walking through a wooded enclosure with fallen logs and dense foliage in the background.",
+        "A peacock walking through an ornamental garden with stone pathways and flowerbeds in the background."
     ],
-    "A woman riding a horse jumping over a fence.": [
-      "A man riding a zebra jumping over a fence.",
-      "A monkey riding a horse jumping over a fence.",
-      "A woman riding a lion jumping over a fence.",
-      "A woman riding a bear jumping over a fence.",
-      "A man riding a tiger jumping over a fence."
+    "The woman is walking through a grassy area, with a backpack on.": [
+        "A man is walking through a forest, with a backpack on.",
+        "A robot is walking through a meadow, with a backpack on.",
+        "An astronaut is walking through a mountain trail, with a backpack on.",
+        "A gorilla is walking through a countryside field, with a backpack on.",
+        "A Kung Fu Panda is walking through a park, with a backpack on."
     ],
-    "A mallard is swimming on the water.": [
-      "A bear is swimming on the water.",
-      "A duckling is swimming on the water.",
-      "A goose is swimming on the water.",
-      "A cat is swimming on the water.",
-      "A dog is swimming on the water."
+    "A brown bear walking on a rocky path in a zoo enclosure.": [
+        "A lion walking on a sandy path in a wildlife reserve.",
+        "A zebra walking on a gravel path in a safari park.",
+        "A gorilla walking on a muddy path in a jungle habitat.",
+        "A deer walking on a forest path in a nature sanctuary.",
+        "A penguin walking on a rocky path in an Antarctic exhibit."
     ],
-    "A woman is dancing on the ground in front of a lot of person.": [
-      "A monkey is dancing on the ground in front of a large crowd.",
-      "An astronaut is dancing on the ground in front of many people.",
-      "A robot is dancing on the ground in front of an audience.",
-      "A lego man is dancing on the ground in front of spectators.",
-      "A bear is dancing on the ground in front of a group of people."
+    "A flamingo is walking in a pond.": [
+        "A heron is walking in a marsh.",
+        "A deer is walking in a meadow.",
+        "A crane is walking in a wetland.",
+        "A duck is walking along the riverbank.",
+        "A peacock is walking in a garden."
     ],
-    "A car goes around the flower bed on the street.": [
-      "A lion goes around the flower bed on the street.",
-      "A motorcycle goes around the flower bed on the street.",
-      "A tank goes around the flower bed on the street.",
-      "A truck goes around the flower bed on the street.",
-      "A bus goes around the flower bed on the street."
+    "A car racing on a track, with smoke coming from the car.": [
+        "A motorcycle racing on a track, with smoke coming from the exhaust.",
+        "A racehorse racing on a dirt track, with dust rising from its hooves.",
+        "A speedboat racing on the water, with smoke rising from its engine.",
+        "A cyclist racing on a paved road, with dust swirling from the tires.",
+        "A jet plane racing through the sky, with smoke trailing behind it."
     ],
-    "A train is turning around on the track.": [
-      "A subway train is turning around on the track.",
-      "A freight train is turning around on the track.",
-      "A passenger train is turning around on the track.",
-      "A high-speed train is turning around on the track.",
-      "A steam locomotive is turning around on the track."
+    "The elephant is walking on the road.": [
+        "The giraffe is walking on the savannah.",
+        "The zebra is walking on the plain.",
+        "The kangaroo is walking on the Australian outback.",
+        "The penguin is walking on the icy shore.",
+        "The deer is walking on the woodland path."
     ],
-    "A rally is driving on the alley.": [
-      "A panda is running on the alley.",
-      "A firefighter is running on the alley.",
-      "A bicycle is driving on the alley.",
-      "A tank is driving on the alley.",
-      "A train is driving on the alley."
+    "A mountain goat is standing on a rocky outcrop, looking down a steep hillside.": [
+        "A deer is standing on a hilltop, looking over the valley.",
+        "A falcon is standing on a cliff edge, looking across the vast plain.",
+        "A zebra is standing on a savanna ridge, looking down at the watering hole.",
+        "A lynx is standing on a snow-covered peak, looking over the frozen landscape.",
+        "A kangaroo is standing on a windswept plateau, looking down at the distant trees."
     ],
-    "A person is paragliding in the sky.": [
-      "A monkey is paragliding in the sky.",
-      "A woman is paragliding in the sky.",
-      "A chef is paragliding in the sky.",
-      "A joker is paragliding in the sky.",
-      "A child is paragliding in the sky."
+    "The man is walking on a rocky trail, carrying a backpack, and looking at a mountain.": [
+        "The gorilla is walking on a rocky trail, carrying a backpack, and looking at a mountain.",
+        "The astronaut is walking on a sandy path, carrying a map, and looking at the horizon.",
+        "The robot is walking on a narrow ridge, carrying ropes, and looking at the valley below.",
+        "The chef is walking on a cobblestone road, carrying a camera, and looking at an ancient ruin.",
+        "The kung fu panda is walking on a muddy trail, carrying a compass, and looking at a dense jungle."
     ],
-    "A cyclist is riding a bicycle over a small hill.": [
-      "A monkey is riding a bicycle over a small hill.",
-      "A panda is running over a small hill.",
-      "A tank is driving over a small hill.",
-      "A woman is riding a bicycle over a small hill.",
-      "A car is driving over a small hill."
+    "The camel is walking in a zoo enclosure, possibly towards a feeding area.": [
+        "The lion is walking in a zoo enclosure, possibly towards a resting area.",
+        "The giraffe is walking in a zoo enclosure, possibly towards a watering station.",
+        "The penguin is walking in a zoo enclosure, possibly towards its habitat pool.",
+        "The zebra is walking in a zoo enclosure, possibly towards an enrichment area.",
+        "The peacock is walking in a zoo enclosure, possibly towards a shaded perch."
     ],
-    "A flamingo is walking in the pond.": [
-      "A pigeon is walking in the pond.",
-      "A penguin is walking in the pond.",
-      "A goose is walking in the pond.",
-      "A duck is walking in the pond.",
-      "A swan is walking in the pond."
+    "A black swan swimming in a pond.": [
+        "A white duck swimming in a lake.",
+        "A red carp swimming in a river.",
+        "A golden fish swimming in a stream.",
+        "A gray goose swimming in a marsh.",
+        "A mallard swimming in a backyard pond."
     ],
-    "An elephant is walking on the sand around by rocks.": [
-      "A hippopotamus is walking on the sand around by rocks.",
-      "A rhinoceros is walking on the sand around by rocks.",
-      "A buffalo is walking on the sand around by rocks.",
-      "A giraffe is walking on the sand around by rocks.",
-      "A zebra is walking on the sand around by rocks."
+    "A soccer ball, which is rolling on the grass near a tree.": [
+        "A basketball rolling across the court near a bench.",
+        "A marble rolling along the floor near a toy.",
+        "A watermelon rolling down a hill near a fence.",
+        "A bowling ball rolling toward the pins near a lane marker.",
+        "A pinwheel spinning beside a rolling ball near a garden path."
     ],
-    "A race car drifts on the straightaway.": [
-      "A tank drifts on the straightaway.",
-      "A motorcycle drifts on the straightaway.",
-      "A truck drifts on the straightaway.",
-      "A bus drifts on the straightaway.",
-      "A skateboarder drifts on the straightaway."
+    "The person is riding a motorcycle on a road, passing a potted plant.": [
+        "The car is riding on a trail, passing a wooden bench.",
+        "The bus is riding on a highway, passing a street lamp.",
+        "The woman is riding a rhino on a dirt path, passing a flower vase.",
+        "The man is riding a horse on a bridge, passing a roadside sign.",
+        "The monkey is riding a moped on a narrow street, passing a hanging basket."
     ],
-    "A scooter is driving on the road.": [
-      "A car is driving on the road.",
-      "A motorbike is driving on the road.",
-      "An elephant is running on the road.",
-      "A bus is driving on the road.",
-      "A train is driving on the road."
+    "The bus is driving down the street.": [
+        "The car is driving through the city.",
+        "The train is driving along the tracks.",
+        "The boat is driving across the lake.",
+        "The motorcycle is driving down the highway.",
+        "The tram is driving through the park."
     ],
-    "A man is hiking on the mountain.": [
-      "A woman is hiking on the mountain.",
-      "A chef is hiking on the mountain.",
-      "A kangaroo is hiking on the mountain.",
-      "A gorilla is hiking on the mountain.",
-      "A joker is hiking on the mountain."
+    "The duck is swimming in a pond.": [
+        "The swan is swimming in a lake.",
+        "The frog is swimming in a marsh.",
+        "The fish is swimming in a river.",
+        "The turtle is swimming in a stream.",
+        "The otter is swimming in a bay."
     ],
-    "A car is driving on the street.": [
-      "A polar bear is running on the street.",
-      "A truck is driving on the street.",
-      "A train is driving on the street.",
-      "A van is driving on the street.",
-      "A tank is driving on the street."
+    "A small car driving on a city street.": [
+        "A motorcycle driving on a narrow alley.",
+        "A lion driving on a rural highway.",
+        "A tank driving on a busy boulevard.",
+        "A bus driving on a suburban road.",
+        "A boat driving on a crowded sidewalk."
     ],
-    "A camel is walking across the sandy land.": [
-      "A dromedary is walking across the sandy land.",
-      "A horse is walking across the sandy land.",
-      "A mule is walking across the sandy land.",
-      "A donkey is walking across the sandy land.",
-      "A llama is walking across the sandy land."
+    "The man is water skiing, holding onto a rope and being pulled across the water.": [
+        "The woman is parasailing, holding onto a harness and being pulled through the sky.",
+        "The boy is wakeboarding, holding onto a handle and being pulled across the lake.",
+        "The athlete is kite surfing, holding onto lines and being pulled over the waves.",
+        "The surfer is bodysurfing, holding onto a board and being propelled by the current.",
+        "The skier is being towed, holding onto a rope and being pulled down the snowy slope."
     ],
-    "A boat is sailing in the river.": [
-      "A shark is swimming in the river.",
-      "A whale is swimming in the river.",
-      "A tank is sailing in the river.",
-      "A train is sailing in the river.",
-      "An airplan is sailing in the river."
+    "A model train driving on a track.": [
+        "A toy car driving on the floor.",
+        "A boat driving on a lake.",
+        "A vintage bike driving on a country road.",
+        "A ariplane driving through the sky.",
+        "A hot air balloon driving over hills."
     ],
-    "A boy is riding a bike down the alley lined with trees.": [
-      "A motorbiker is riding a motorbike down the alley lined with trees.",
-      "A bear is running down the alley lined with trees.",
-      "A lion is running down the alley lined with trees.",
-      "A astronaut is riding a bike down the alley lined with trees.",
-      "A firefighter is riding a bike down the alley lined with trees."
+    "The person is windsurfing on a body of water, holding onto a sail with a green and yellow design.": [
+        "A boat is windsurfing on the ocean, holding onto a sail with a blue and white design.",
+        "A car is windsurfing on a tranquil lake, holding onto a sail with a red and orange design.",
+        "A tank is windsurfing on a choppy sea, holding onto a sail with a purple and black design.",
+        "A bus is windsurfing on a coastal bay, holding onto a sail with a pink and yellow design.",
+        "A UFO is windsurfing on a wide river, holding onto a sail with a green and teal design."
+    ],
+    "A small boat traveling on a body of water, possibly a lake or a calm sea, with a backdrop of a rocky shore and a few buildings.": [
+        "A canoe traveling on a tranquil lake surrounded by a rocky shore and some cottages.",
+        "A kayak traveling on a serene sea with a backdrop of a rocky shore and a few lighthouses.",
+        "A sailboat traveling on a calm river with a view of a rocky shore and distant warehouses.",
+        "A rowboat traveling on a peaceful pond near a rocky shore and a cluster of old mills.",
+        "A motorboat traveling on a quiet bay with a rocky shore lined with modern seaside buildings."
     ]
-  }
-  
+}
