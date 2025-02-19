@@ -11,17 +11,17 @@ device = "cuda"
 
 prompt = "An astronaut is dancing on mars."
 
-ckpt_path = "checkpoints/lr_2e-6_skipconv1d_kernel_3_mid_128_res_480x720_mse_1.0_hunyuan_dance-twirl/checkpoint-500/motion_embedding.pth"
+ckpt_path = "checkpoints/lr_1e-5_skipconv1d_kernel_5_mid_128_warmup_100_gas_1_mse_1.0_512x768_hunyuan_dance-twirl/checkpoint-500/motion_embedding.pth"
 rank = 128
-kernel_size = 3
+kernel_size = 5
 
 version = "skipconv1d"
-video_height = 544
-video_width = 960
+video_height = 512
+video_width = 768
 max_num_frames = 49
 seed=42
 
-config = "_".join(ckpt_path.split("/")[1: 3]) + "_30"
+config = "_".join(ckpt_path.split("/")[1: 3]) + "_0-17" + "_dual"
 
 model_id = "hunyuanvideo-community/HunyuanVideo"
 
@@ -41,13 +41,13 @@ else:
 
 attn_processors = {}
 for key, value in transformer.attn_processors.items():
-    if "token_refiner" in key:
+    if "token_refiner" in key or "single" in key:
         attn_processors[key] = value
         continue
 
     block_idx = int(key.split(".")[-3])
 
-    if block_idx in list(range(num_layers)):
+    if block_idx in list(range(17)):
         attn_processor = attn_processor_type(
             height=height, 
             width=width, 
