@@ -16,8 +16,8 @@ rank = 128
 kernel_size = 3
 
 version = "skipconv1d"
-video_height = 480
-video_width = 720
+video_height = 544
+video_width = 960
 max_num_frames = 49
 seed=42
 
@@ -49,7 +49,12 @@ for key, value in transformer.attn_processors.items():
 
     if block_idx in list(range(num_layers)):
         attn_processor = attn_processor_type(
-            height=height, width=width, frames=frames, dim=dim, rank=rank, kernel_size=kernel_size
+            height=height, 
+            width=width, 
+            frames=frames, 
+            dim=dim, 
+            rank=rank, 
+            kernel_size=kernel_size
         ).to(transformer.device, dtype=torch.bfloat16)
         for param in attn_processor.parameters():
             param.requires_grad_(True)
