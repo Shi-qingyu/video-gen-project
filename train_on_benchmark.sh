@@ -66,7 +66,7 @@ for DATASET_SUBDIR in "$BASE_DATA_DIR"/*/; do
             --skip_frames_start 0 \
             --skip_frames_end 0 \
             --train_batch_size 1 \
-            --max_train_steps 500 \
+            --max_train_steps 300 \
             --checkpointing_steps 100 \
             --resume_from_checkpoint "" \
             --gradient_accumulation_steps 4 \
