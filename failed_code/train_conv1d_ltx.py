@@ -732,6 +732,16 @@ def encode_prompt(
     return prompt_embeds, prompt_attention_mask
 
 
+def _normalize_latents(
+    latents: torch.Tensor, latents_mean: torch.Tensor, latents_std: torch.Tensor, scaling_factor: float = 1.0
+) -> torch.Tensor:
+    # Normalize latents across the channel dimension [B, C, F, H, W]
+    latents_mean = latents_mean.view(1, -1, 1, 1, 1).to(latents.device, latents.dtype)
+    latents_std = latents_std.view(1, -1, 1, 1, 1).to(latents.device, latents.dtype)
+    latents = (latents - latents_mean) * scaling_factor / latents_std
+    return latents
+
+
 def prepare_rotary_positional_embeddings(
     height: int,
     width: int,
@@ -1223,9 +1233,15 @@ def main(args):
                 prompt_embeds = prompt_embeds.to(weight_dtype)
                 prompt_attention_mask = prompt_attention_mask.to(weight_dtype)
 
-                # Sample noise that will be added to the latents
-                noise = torch.randn_like(model_input)
                 batch_size, num_channels, num_frames, height, width = model_input.shape # [B, C, F, H, W]
+                model_input = _normalize_latents(model_input, vae.latents_mean, vae.latents_std)
+                model_input = LTXPipeline._pack_latents(
+                    model_input,
+                    patch_size=unwrap_model(transformer).config.patch_size,
+                    patch_size_t=unwrap_model(transformer).config.patch_size_t,
+                )
+
+                noise = torch.randn_like(model_input)
 
                 # Sample a random timestep for each image
                 # for weighting schemes where we sample timesteps non-uniformly
@@ -1251,12 +1267,6 @@ def main(args):
                     vae.spatial_compression_ratio,
                 )
 
-                noisy_model_input = LTXPipeline._pack_latents(
-                    noisy_model_input,
-                    patch_size=unwrap_model(transformer).config.patch_size,
-                    patch_size_t=unwrap_model(transformer).config.patch_size_t,
-                )
-
                 # Predict the noise residual
                 model_pred = transformer(
                     hidden_states=noisy_model_input,
@@ -1270,15 +1280,6 @@ def main(args):
                     attention_kwargs=dict(),
                     return_dict=False,
                 )[0]
-
-                model_pred = LTXPipeline._unpack_latents(
-                    model_pred,
-                    num_frames=frames,
-                    height=height,
-                    width=width,
-                    patch_size=unwrap_model(transformer).config.patch_size,
-                    patch_size_t=unwrap_model(transformer).config.patch_size_t,
-                )
 
                 weighting = compute_loss_weighting_for_sd3(weighting_scheme=args.weighting_scheme, sigmas=sigmas)
 

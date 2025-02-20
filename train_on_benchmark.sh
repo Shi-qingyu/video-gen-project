@@ -4,7 +4,7 @@
 set -e
 
 # Define the base directories
-BASE_DATA_DIR="./MTBench_subset/MTBench_medium"
+BASE_DATA_DIR="./MTBench_subset/MTBench_easy"
 BASE_OUTPUT_DIR="checkpoints"
 
 # Define the model path

@@ -10,15 +10,15 @@ device = "cuda"
 
 prompt = "An astronaut is dancing on mars."
 
-ckpt_path = "checkpoints/lr_1e-5_skipconv1d_kernel_5_mid_128_warmup_100_gas_1_mse_1.0_512x768_hunyuan_dance-twirl/checkpoint-500/motion_embedding.pth"
+ckpt_path = "checkpoints/ltx/lr_3e-5_skipconv1d_kernel_3_mid_128_warmup_100_gas_4_logit_normal_mse_1.0_512x768_ltx_dance-twirl/checkpoint-1500/motion_embedding.pth"
 rank = 128
-kernel_size = 5
+kernel_size = 3
 
 version = "skipconv1d"
-video_height = 480
-video_width = 704
-max_num_frames = 49
-seed=42
+video_height = 512
+video_width = 768
+max_num_frames = 161
+seed = 42
 
 pipe = LTXPipeline.from_pretrained("Lightricks/LTX-Video", torch_dtype=torch.bfloat16)
 pipe = pipe.to(device)
@@ -46,7 +46,7 @@ for key, value in transformer.attn_processors.items():
 
     block_idx = int(key.split(".")[-3])
 
-    if block_idx in list(range(transformer.config.num_layers)):
+    if block_idx in list(range(num_layers)):
         attn_processor = SkipConv1dLTXVideoAttentionProcessor2_0(
             height=height, 
             width=width, 
@@ -72,6 +72,8 @@ video = pipe(
     height=video_height,
     num_frames=max_num_frames,
     num_inference_steps=50,
-    generator=torch.Generator(device="cuda").manual_seed(seed),
+    generator=torch.Generator(device=device).manual_seed(seed),
 ).frames[0]
+
+
 export_to_video(video, "output.mp4", fps=8)
