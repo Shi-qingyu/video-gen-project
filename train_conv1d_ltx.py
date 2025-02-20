@@ -36,6 +36,7 @@ from tqdm.auto import tqdm
 from transformers import T5EncoderModel, T5TokenizerFast
 
 import diffusers
+from diffusers.pipelines.ltx.pipeline_ltx import LTXPipeline
 from src.transformer import MyLTXVideoTransformer3DModel
 from diffusers.models.autoencoders import AutoencoderKLLTXVideo
 from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
@@ -637,7 +638,6 @@ def _get_t5_prompt_embeds(
     tokenizer,
     text_encoder,
     prompt: Union[str, List[str]] = None,
-    num_videos_per_prompt: int = 1,
     max_sequence_length: int = 128,
     device: Optional[torch.device] = None,
     dtype: Optional[torch.dtype] = None,
@@ -672,14 +672,6 @@ def _get_t5_prompt_embeds(
     prompt_embeds = text_encoder(text_input_ids.to(device))[0]
     prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
 
-    # duplicate text embeddings for each generation per prompt, using mps friendly method
-    _, seq_len, _ = prompt_embeds.shape
-    prompt_embeds = prompt_embeds.repeat(1, num_videos_per_prompt, 1)
-    prompt_embeds = prompt_embeds.view(batch_size * num_videos_per_prompt, seq_len, -1)
-
-    prompt_attention_mask = prompt_attention_mask.view(batch_size, -1)
-    prompt_attention_mask = prompt_attention_mask.repeat(num_videos_per_prompt, 1)
-
     return prompt_embeds, prompt_attention_mask
 
 # Copied from diffusers.pipelines.mochi.pipeline_mochi.MochiPipeline.encode_prompt with 256->128
@@ -687,13 +679,8 @@ def encode_prompt(
     tokenizer,
     text_encoder,
     prompt: Union[str, List[str]],
-    negative_prompt: Optional[Union[str, List[str]]] = None,
-    do_classifier_free_guidance: bool = True,
-    num_videos_per_prompt: int = 1,
     prompt_embeds: Optional[torch.Tensor] = None,
-    negative_prompt_embeds: Optional[torch.Tensor] = None,
     prompt_attention_mask: Optional[torch.Tensor] = None,
-    negative_prompt_attention_mask: Optional[torch.Tensor] = None,
     max_sequence_length: int = 128,
     device: Optional[torch.device] = None,
     dtype: Optional[torch.dtype] = None,
@@ -737,39 +724,12 @@ def encode_prompt(
             tokenizer=tokenizer,
             text_encoder=text_encoder,
             prompt=prompt,
-            num_videos_per_prompt=num_videos_per_prompt,
             max_sequence_length=max_sequence_length,
             device=device,
             dtype=dtype,
         )
 
-    if do_classifier_free_guidance and negative_prompt_embeds is None:
-        negative_prompt = negative_prompt or ""
-        negative_prompt = batch_size * [negative_prompt] if isinstance(negative_prompt, str) else negative_prompt
-
-        if prompt is not None and type(prompt) is not type(negative_prompt):
-            raise TypeError(
-                f"`negative_prompt` should be the same type to `prompt`, but got {type(negative_prompt)} !="
-                f" {type(prompt)}."
-            )
-        elif batch_size != len(negative_prompt):
-            raise ValueError(
-                f"`negative_prompt`: {negative_prompt} has batch size {len(negative_prompt)}, but `prompt`:"
-                f" {prompt} has batch size {batch_size}. Please make sure that passed `negative_prompt` matches"
-                " the batch size of `prompt`."
-            )
-
-        negative_prompt_embeds, negative_prompt_attention_mask = _get_t5_prompt_embeds(
-            tokenizer=tokenizer,
-            text_encoder=text_encoder,
-            prompt=negative_prompt,
-            num_videos_per_prompt=num_videos_per_prompt,
-            max_sequence_length=max_sequence_length,
-            device=device,
-            dtype=dtype,
-        )
-
-    return prompt_embeds, prompt_attention_mask, negative_prompt_embeds, negative_prompt_attention_mask
+    return prompt_embeds, prompt_attention_mask
 
 
 def prepare_rotary_positional_embeddings(
@@ -1077,7 +1037,7 @@ def main(args):
     def save_model_hook(models, weights, output_dir):
         if accelerator.is_main_process:
             for model in models:
-                if isinstance(unwrap_model(model), SkipConv1dLTXVideoAttentionProcessor2_0):
+                if isinstance(unwrap_model(model), MyLTXVideoTransformer3DModel):
                     save_path = os.path.join(output_dir, "motion_embedding.pth")
                     embedding_state_dict = {}
                     for name, param in model.state_dict().items():
@@ -1245,24 +1205,23 @@ def main(args):
 
             with accelerator.accumulate(models_to_accumulate):
                 model_input = batch["videos"].to(dtype=weight_dtype)  # [B, C, F, H, W]
-                # trajectories = batch["trajectories"].to(accelerator.device) # [B, F, N, 3(h w visible)]
+                # trajectories = batch["trajectories"].to(accelerator.device) # [B, F, N, 3 -> (h w visible)]
                 prompts = batch["prompts"]
 
                 # encode prompts
-                prompt_embeds, pooled_prompt_embeds, prompt_attention_mask = encode_prompt(
-                    tokenizer,
-                    text_encoder,
+                (
+                    prompt_embeds,
+                    prompt_attention_mask,
+                ) = encode_prompt(
+                    tokenizer=tokenizer,
+                    text_encoder=text_encoder,
                     prompt=prompts,
-                    negative_prompt=None,
-                    do_classifier_free_guidance=False,
                     device=accelerator.device,
-                    dtype=weight_dtype,
+                    dtype=text_encoder.dtype,
                 )
 
                 prompt_embeds = prompt_embeds.to(weight_dtype)
                 prompt_attention_mask = prompt_attention_mask.to(weight_dtype)
-                if pooled_prompt_embeds is not None:
-                    pooled_prompt_embeds = pooled_prompt_embeds.to(weight_dtype)
 
                 # Sample noise that will be added to the latents
                 noise = torch.randn_like(model_input)
@@ -1280,23 +1239,46 @@ def main(args):
                 indices = (u * noise_scheduler_copy.config.num_train_timesteps).long()
                 timesteps = noise_scheduler_copy.timesteps[indices].to(device=model_input.device)
 
-                guidance = torch.tensor([6.0] * model_input.shape[0], dtype=weight_dtype, device=model_input.device)
-
                 # Add noise to the model input according to the noise magnitude at each timestep
                 sigmas = get_sigmas(timesteps, n_dim=model_input.ndim, dtype=model_input.dtype)
                 noisy_model_input = (1.0 - sigmas) * model_input + sigmas * noise
 
+                frame_rate = 25 # what is this :( ?
+                latent_frame_rate = frame_rate / vae.temporal_compression_ratio
+                rope_interpolation_scale = (
+                    1 / latent_frame_rate,
+                    vae.spatial_compression_ratio,
+                    vae.spatial_compression_ratio,
+                )
+
+                noisy_model_input = LTXPipeline._pack_latents(
+                    noisy_model_input,
+                    patch_size=unwrap_model(transformer).config.patch_size,
+                    patch_size_t=unwrap_model(transformer).config.patch_size_t,
+                )
+
                 # Predict the noise residual
                 model_pred = transformer(
-                    hidden_states=noisy_model_input,    # [B, C, F, H, W]
-                    timestep=timesteps,
+                    hidden_states=noisy_model_input,
                     encoder_hidden_states=prompt_embeds,
+                    timestep=timesteps,
                     encoder_attention_mask=prompt_attention_mask,
-                    pooled_projections=pooled_prompt_embeds,
-                    guidance=guidance,
-                    attention_kwargs={},
+                    num_frames=frames,
+                    height=height,
+                    width=width,
+                    rope_interpolation_scale=rope_interpolation_scale,
+                    attention_kwargs=dict(),
                     return_dict=False,
                 )[0]
+
+                model_pred = LTXPipeline._unpack_latents(
+                    model_pred,
+                    num_frames=frames,
+                    height=height,
+                    width=width,
+                    patch_size=unwrap_model(transformer).config.patch_size,
+                    patch_size_t=unwrap_model(transformer).config.patch_size_t,
+                )
 
                 weighting = compute_loss_weighting_for_sd3(weighting_scheme=args.weighting_scheme, sigmas=sigmas)
 
