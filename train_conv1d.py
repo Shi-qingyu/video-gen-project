@@ -201,7 +201,7 @@ def get_args():
         "--module_type",
         type=str,
         default="conv1d",
-        help=("The version of temporal conv1d."),
+        help=("The type of motion module."),
     )
     parser.add_argument(
         "--mixed_precision",
@@ -1218,9 +1218,7 @@ def main(args):
 
             with accelerator.accumulate(models_to_accumulate):
                 model_input = batch["videos"].permute(0, 2, 1, 3, 4).to(dtype=weight_dtype)  # [B, F, C, H, W]
-                # trajectories = batch["trajectories"].to(accelerator.device) # [B, F, N, 2]
-                # local_trajectories = batch["local_trajectories"].to(accelerator.device) # [B, F, N', 2]
-                # masks = batch["masks"].to(accelerator.device)  # [B, F, H, W]
+                trajectories = batch["trajectories"].to(accelerator.device) # [B, F, N, 3 -> (h, w, visiable)]
                 prompts = batch["prompts"]
 
                 # encode prompts
@@ -1236,7 +1234,11 @@ def main(args):
 
                 # Sample noise that will be added to the latents
                 noise = torch.randn_like(model_input)
-                batch_size, num_frames, num_channels, height, width = model_input.shape # [B, F, C, H, W]
+                batch_size, num_frames, num_channels, height, width = model_input.shape     # [B, F, C, H, W]
+
+                frame_ids = torch.linspace(0, trajectories.size(1) - 1, num_frames).to(torch.int32)
+                trajectories = trajectories[:, frame_ids]   # [B, num_frames, N, 3]
+                trajectories, visibilities = trajectories[:, :, :, :2], trajectories[:, :, :, 2:]
 
                 # Sample a random timestep for each image
                 timesteps = torch.randint(
@@ -1285,9 +1287,8 @@ def main(args):
 
                 if timesteps <= 400:
                     if args.tracking_loss:
-                        frame_ids = torch.linspace(0, trajectories.size(1) - 1, num_frames).to(torch.int32)
-                        trajectories = trajectories[:, frame_ids]
                         batch_size, _, num_trajectories, _ = trajectories.shape
+                        batch_size, _, num_trajectories, _ = visibilities.shape
                         model_pred_ = model_pred.permute(0, 1, 3, 4, 2)  # [B, F, H, W, C]
                         batch_ids = torch.arange(batch_size)[:, None, None].repeat(1, num_trajectories, num_frames).to(accelerator.device)
                         frame_ids = torch.arange(num_frames)[None, None, :].repeat(batch_size, num_trajectories, 1).to(accelerator.device)
@@ -1296,13 +1297,18 @@ def main(args):
                         h_coor = h_coor.to(torch.int32).clamp(0, height - 1)
                         w_coor = w_coor.to(torch.int32).clamp(0, width - 1)
 
+                        # [B, N, F, 1]
+                        visibilities = visibilities.permute(0, 2, 1, 3)
                         # [B, N, F, C]
                         trajectory_embeddings = model_pred_[batch_ids, frame_ids, h_coor, w_coor]
-                        tracker_loss = torch.mean(
-                            ((trajectory_embeddings[:, :, 1:] - trajectory_embeddings[:, :, :-1]) ** 2).reshape(batch_size, -1), dim=1
+                        # [B, N, F-1, C]
+                        tracking_loss = (trajectory_embeddings[:, :, 1:] - trajectory_embeddings[:, :, :-1]) ** 2
+                        tracking_loss = torch.mean(
+                            (visibilities[:, :, 1:] * tracking_loss).reshape(batch_size, -1), dim=1
                         )
-                        tracker_loss = tracker_loss.mean()
-                        loss = loss + args.tracking_loss_weight * tracker_loss
+                        tracking_loss = tracking_loss
+                        tracking_loss = tracking_loss.mean()
+                        loss = loss + args.tracking_loss_weight * tracking_loss
                         del model_pred_
 
                     if args.high_frequency_loss:
