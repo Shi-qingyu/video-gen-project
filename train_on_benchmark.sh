@@ -28,7 +28,7 @@ for DATASET_SUBDIR in "$BASE_DATA_DIR"/*/; do
         DATASET_PATH="$BASE_DATA_DIR/$DATASET_NAME"
 
         # Define the OUTPUT_PATH based on the dataset name
-        OUTPUT_PATH="$BASE_OUTPUT_DIR/lr_1e-5_attentionconv1d_conv1d_kernel_5_mid_128_mse_1.0_$DATASET_NAME"
+        OUTPUT_PATH="$BASE_OUTPUT_DIR/lr_1e-5_skipconv1d_conv1d_kernel_3_mid_128_mse_1.0_tracking_loss_1e-1_$DATASET_NAME"
 
         # Export the environment variables for the current iteration
         export DATASET_PATH
@@ -50,8 +50,8 @@ for DATASET_SUBDIR in "$BASE_DATA_DIR"/*/; do
             --enable_tiling \
             --enable_slicing \
             --rank 128 \
-            --kernel 5 \
-            --version attentionconv1d \
+            --kernel 3 \
+            --version skipconv1d \
             --module_type conv1d \
             --instance_data_root $DATASET_PATH \
             --caption_column prompts.txt \
@@ -74,7 +74,9 @@ for DATASET_SUBDIR in "$BASE_DATA_DIR"/*/; do
             --optimizer AdamW \
             --adam_beta1 0.9 \
             --adam_beta2 0.95 \
-            --mse_weight 1.0
+            --mse_weight 1.0 \
+            --tracking_loss \
+            --tracking_loss_weight 1e-1
 
         echo "Training completed for dataset: $DATASET_NAME"
         echo "Output saved to: $OUTPUT_PATH"
