@@ -331,8 +331,6 @@ def inject_motion_embedding(
                 motion_embedding = TemporalEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
             elif version == "spatial_frozen_temporal" or version == "temporal_frozen_spatial" or version == "spatial_temporal":
                 motion_embedding = SpatialTemporalEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
-            elif version == "spatial_motion":
-                motion_embedding = SpatialMotionEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
             elif version == "scale_shift":
                 motion_embedding = ScaleShiftEmbedding(height=height, width=width, frames=frames, dim=dim).to(transformer.device)
             elif version == "adaptive_spatial_temporal":

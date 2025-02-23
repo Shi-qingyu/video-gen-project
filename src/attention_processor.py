@@ -2,9 +2,12 @@ from typing import Optional
 import gc
 
 import torch
+from torch import nn
 import torch.nn.functional as F
 
 from diffusers.models.attention_processor import CogVideoXAttnProcessor2_0, Attention
+
+from new.attention_processor import Conv1DModule, MLPModule
 
 
 class VisAttnMapCogVideoXAttnProcessor2_0(CogVideoXAttnProcessor2_0):
@@ -184,6 +187,161 @@ class VisAttnMapCogVideoXAttnProcessor2_0(CogVideoXAttnProcessor2_0):
         encoder_hidden_states, hidden_states = hidden_states.split(
             [text_seq_length, hidden_states.size(1) - text_seq_length], dim=1
         )
+        return hidden_states, encoder_hidden_states
+    
+
+class NewVisAttnMapCogVideoXAttnProcessor2_0(nn.Module):
+    def __init__(
+        self,
+        height,
+        width,
+        frames,
+        dim,
+        rank,
+        kernel_size,
+        module_type,
+        block_idx=None,
+        word_ids=None,
+        query_frame_ids=None,
+        attention_store=None,
+    ):
+        super().__init__()
+        self.layer_idx = block_idx
+
+        self.attention_store = attention_store
+        self.word_ids = word_ids
+        self.query_frame_ids = query_frame_ids
+
+        self.height = height
+        self.width = width
+        self.frames = frames
+        self.dim = dim
+
+        self.module_type = module_type
+
+        if module_type == "conv1d":
+            self.temporal_emb = Conv1DModule(input_channels=dim, mid_channels=rank, kernel_size=kernel_size)
+        elif module_type == "mlp":
+            self.temporal_emb = MLPModule(input_channels=dim, mid_channels=rank)
+
+    def store_attention_map(
+        self,
+        attention_map,
+        store_text_cross_attention,
+    ):
+        if store_text_cross_attention:
+            attention_map = attention_map.reshape(
+                self.frames, self.height, self.width, -1 
+            )
+            attention_map = attention_map.detach().clone().cpu()
+            self.attention_store.store(self.layer_idx, attention_map)
+        else:
+            attention_map = attention_map.reshape(
+                self.height, self.width, -1
+            )
+            attention_map = attention_map.detach().clone().cpu()
+            self.attention_store.store(self.layer_idx, attention_map)
+
+    def __call__(
+        self,
+        attn: Attention,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        attention_mask: torch.Tensor = None,
+        image_rotary_emb: torch.Tensor = None,
+    ):
+        text_seq_length = encoder_hidden_states.size(1)
+
+        if self.module_type == "conv1d":
+            hidden_states_conv1d = hidden_states.reshape(-1, self.frames, self.height, self.width, self.dim)
+            hidden_states_conv1d = hidden_states_conv1d.permute(0, 2, 3, 4, 1).flatten(0, 2)    # [BHW, T, C]
+            hidden_states_conv1d = self.temporal_emb(hidden_states_conv1d)  # [BHW, T, C]
+            hidden_states_conv1d = hidden_states_conv1d.reshape(-1, self.height, self.width, self.dim, self.frames)
+            hidden_states_conv1d = hidden_states_conv1d.permute(0, 4, 1, 2, 3)
+            hidden_states_skip = hidden_states_conv1d.flatten(1, 3)
+        elif self.module_type == "mlp":
+            hidden_states_mlp = self.temporal_emb(hidden_states)
+            hidden_states_skip = hidden_states_mlp
+
+        hidden_states = torch.cat([encoder_hidden_states, hidden_states], dim=1)
+
+        batch_size, sequence_length, _ = (
+            hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
+        )
+
+        query = attn.to_q(hidden_states)
+        key = attn.to_k(hidden_states)
+        value = attn.to_v(hidden_states)
+
+        inner_dim = key.shape[-1]
+        head_dim = inner_dim // attn.heads
+
+        query = query.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
+        key = key.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
+        value = value.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
+
+        if attn.norm_q is not None:
+            query = attn.norm_q(query)
+        if attn.norm_k is not None:
+            key = attn.norm_k(key)
+
+        # Apply RoPE if needed
+        if image_rotary_emb is not None:
+            from diffusers.models.embeddings import apply_rotary_emb
+
+            query[:, :, text_seq_length:] = apply_rotary_emb(query[:, :, text_seq_length:], image_rotary_emb)
+            if not attn.is_cross_attention:
+                key[:, :, text_seq_length:] = apply_rotary_emb(key[:, :, text_seq_length:], image_rotary_emb)
+        
+        hidden_states_chunks = []
+        chunk_size = self.height * self.width
+        num_chunk = int((query.shape[2] - text_seq_length) / chunk_size + 1)
+        chunk_ids = [(text_seq_length + i * chunk_size) for i in range(num_chunk)]
+        
+        query = query.flatten(0, 1)
+        key = key.flatten(0, 1)
+        value = value.flatten(0, 1)
+
+        attention_maps = []
+        start_idx = 0
+
+        for i, idx in enumerate(chunk_ids):
+            end_idx = idx
+            query_chunk = query[:, start_idx: end_idx]
+
+            # (bs * h, len_q, len_k)
+            attention_probs = attn.get_attention_scores(query_chunk, key, attention_mask=attention_mask)
+            if i != 0:
+                if self.word_ids is not None:
+                    word_ids = torch.tensor(self.word_ids, device=query.device).to(torch.int32)
+                    attention_maps.append(attention_probs[attn.heads:, :, word_ids].mean(0))  # (1350)
+                else:
+                    if i == self.query_frame_ids:
+                        attention_maps.append(attention_probs[attn.heads:, :, text_seq_length:].mean(0)) # (1350, 17550)
+
+            hidden_states_chunk = torch.bmm(attention_probs, value)
+            hidden_states_chunk = hidden_states_chunk.reshape(-1, attn.heads, *hidden_states_chunk.shape[1:])
+            hidden_states_chunk = hidden_states_chunk.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
+            hidden_states_chunks.append(hidden_states_chunk)
+            start_idx = end_idx
+        
+        hidden_states = torch.cat(hidden_states_chunks, dim=1)   # (bs, seq_len, dim)
+        attention_map = torch.cat(attention_maps, dim=0) # concat all of the frames
+        self.store_attention_map(
+            attention_map=attention_map, 
+            store_text_cross_attention=self.word_ids is not None,
+        )
+
+        # linear proj
+        hidden_states = attn.to_out[0](hidden_states)
+        # dropout
+        hidden_states = attn.to_out[1](hidden_states)
+
+        encoder_hidden_states, hidden_states = hidden_states.split(
+            [text_seq_length, hidden_states.size(1) - text_seq_length], dim=1
+        )
+
+        hidden_states = hidden_states + hidden_states_skip
         return hidden_states, encoder_hidden_states
 
 

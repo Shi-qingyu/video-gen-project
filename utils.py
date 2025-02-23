@@ -424,4 +424,4 @@ def organize_outputs():
 
 
 if __name__ == "__main__":
-    organize_outputs()  
+    delete_bin_files("checkpoints")

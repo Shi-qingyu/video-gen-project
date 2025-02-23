@@ -4,7 +4,7 @@
 set -e
 
 # Define the base directories
-BASE_DATA_DIR="./MTBench_subset/MTBench_easy"
+BASE_DATA_DIR="./MTBench_subset/MTBench_medium"
 BASE_OUTPUT_DIR="checkpoints"
 
 # Define the model path
@@ -66,7 +66,7 @@ for DATASET_SUBDIR in "$BASE_DATA_DIR"/*/; do
             --skip_frames_start 0 \
             --skip_frames_end 0 \
             --train_batch_size 1 \
-            --max_train_steps 300 \
+            --max_train_steps 500 \
             --checkpointing_steps 100 \
             --resume_from_checkpoint "" \
             --gradient_accumulation_steps 4 \

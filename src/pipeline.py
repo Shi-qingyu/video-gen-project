@@ -552,8 +552,6 @@ class IntermediateCogVideoXPipeline(CogVideoXPipeline):
         # 8. Denoising loop
         num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
 
-        loss_tracker = []
-        eps_prev = None
         intermediate = None
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             # for DPM-solver++
@@ -588,14 +586,6 @@ class IntermediateCogVideoXPipeline(CogVideoXPipeline):
 
                 alpha_prod_t = self.scheduler.alphas_cumprod[t]
                 eps = (alpha_prod_t ** 0.5) * noise_pred[-1] + (1 - alpha_prod_t) ** 0.5 * latent_model_input[-1]
-
-                if eps_prev is None:
-                    eps_prev = eps
-                else:
-                    loss = F.mse_loss(eps, eps_prev)
-                    eps_prev = eps
-                    loss_tracker.append(loss.item())
-
 
                 # perform guidance
                 if use_dynamic_cfg:
