@@ -278,9 +278,9 @@ if __name__ == "__main__":
     generated_video_root = "outputs_benchmark/lr_1e-5_skipconv1d_conv1d_mid_128_kernel_3_mse_1.0"
 
     motion_fidelity_score = motion_fidelity(benchmark_root, generated_video_root, "../../track/co-tracker/checkpoints/scaled_offline.pth")
-    # clip_score = CLIP_Score(generated_video_root)
-    # temporal_consistency_score = temporal_consistency(generated_video_root)
+    clip_score = CLIP_Score(generated_video_root)
+    temporal_consistency_score = temporal_consistency(generated_video_root)
 
     print(f"Motion Fidelity: {motion_fidelity_score}")
-    # print(f"CLIP Score: {clip_score}")
-    # print(f"Temporal Consistency Score: {temporal_consistency_score}")中
+    print(f"CLIP Score: {clip_score}")
+    print(f"Temporal Consistency Score: {temporal_consistency_score}")

@@ -90,7 +90,6 @@ class MyCogVideoXTransformer3DModel(CogVideoXTransformer3DModel):
                     attention_bias=attention_bias,
                     norm_elementwise_affine=norm_elementwise_affine,
                     norm_eps=norm_eps,
-                    # block_idx=str(i),
                 )
                 for i in range(num_layers)
             ]

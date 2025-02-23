@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from diffusers.models.attention_processor import CogVideoXAttnProcessor2_0, Attention
 
-from new.attention_processor import Conv1DModule, MLPModule
+from src.new.attention_processor import Conv1DModule, MLPModule
 
 
 class VisAttnMapCogVideoXAttnProcessor2_0(CogVideoXAttnProcessor2_0):

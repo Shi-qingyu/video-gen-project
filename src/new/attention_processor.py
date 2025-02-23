@@ -258,7 +258,18 @@ class KVConv1dCogVideoXAttnProcessor2_0(nn.Module):
 
 
 class SkipConv1dCogVideoXAttnProcessor2_0(nn.Module):
-    def __init__(self, height, width, frames, dim, rank=128, kernel_size=3, module_type="conv1d"):
+    def __init__(
+        self, 
+        height, 
+        width, 
+        frames, 
+        dim, 
+        rank=128, 
+        kernel_size=3, 
+        module_type="conv1d",
+        store=None,
+        block_index=None,
+    ):
         super().__init__()
         self.height = height
         self.width = width
@@ -271,6 +282,9 @@ class SkipConv1dCogVideoXAttnProcessor2_0(nn.Module):
             self.temporal_emb = Conv1DModule(input_channels=dim, mid_channels=rank, kernel_size=kernel_size)
         elif module_type == "mlp":
             self.temporal_emb = MLPModule(input_channels=dim, mid_channels=rank)
+        
+        self.store = store
+        self.block_index = block_index
     
     def __call__(
         self,
@@ -288,6 +302,8 @@ class SkipConv1dCogVideoXAttnProcessor2_0(nn.Module):
             hidden_states_conv1d = self.temporal_emb(hidden_states_conv1d)  # [BHW, T, C]
             hidden_states_conv1d = hidden_states_conv1d.reshape(-1, self.height, self.width, self.dim, self.frames)
             hidden_states_conv1d = hidden_states_conv1d.permute(0, 4, 1, 2, 3)
+            if self.store is not None:
+                self.store[self.block_index] = self.store.get(self.block_index, 0) + hidden_states_conv1d[-1].float().detach().clone().cpu()
             hidden_states_skip = hidden_states_conv1d.flatten(1, 3)
         elif self.module_type == "mlp":
             hidden_states_mlp = self.temporal_emb(hidden_states)

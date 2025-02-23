@@ -10,19 +10,18 @@ from diffusers.models.transformers.cogvideox_transformer_3d import CogVideoXTran
 from diffusers.utils import export_to_video, BaseOutput
 
 from src.pipeline import IntermediateCogVideoXPipeline
-from src.new.attention_processor import SkipConv1dCogVideoXAttnProcessor2_0, AttentionConv1dCogVideoXAttnProcessor2_0, KVConv1dCogVideoXAttnProcessor2_0
+from src.motion_embedding import inject_and_load_motion_embedding
+from src.pipeline import MyCogVideoXPipeline
 
 from utils import save_tensor_as_images
 
 
 SEED = 42
 
-prompt = "A deer is running through a grassland."
+prompt = "An astronaut is dancing on mars."
 device = "cuda"
-ckpt_path = "checkpoints/lr_1e-5_skipconv1d_conv1d_mid_128_kernel_3_mse_1.0_tracking_loss_1e-1_dog-agility/checkpoint-500/motion_embedding.pth"
-rank = 128
-kernel_size = 3
-module_type = "conv1d"
+ckpt_path = "checkpoints/lr_1e-3_spatial_temporal_dance-twirl/checkpoint-500/motion_embedding.pth"
+version = "spatial_temporal"
 
 intermediate_layer = 1
 
@@ -110,44 +109,24 @@ def forward(
     return Transformer2DModelOutput(sample=output, intermediate=intermediate)
 
 
-transformer = CogVideoXTransformer3DModel.from_pretrained(
-    "THUDM/CogVideoX-5b",
-    subfolder="transformer",
-    torch_dtype=torch.bfloat16,
-)
-transformer.forward = forward.__get__(transformer, CogVideoXTransformer3DModel)
-
-height = transformer.config.sample_height // transformer.config.patch_size
-width = transformer.config.sample_width // transformer.config.patch_size
-frames = transformer.config.sample_frames // transformer.config.temporal_compression_ratio + 1
-dim = transformer.config.num_attention_heads * transformer.config.attention_head_dim
-
-attn_processors = {}
-for key, value in transformer.attn_processors.items():
-    block_idx = int(key.split(".")[1])
-    if block_idx in list(range(0, 15)):
-        attn_processor = SkipConv1dCogVideoXAttnProcessor2_0(
-            height=height, 
-            width=width, 
-            frames=frames, 
-            dim=dim, 
-            rank=rank,
-            kernel_size=kernel_size,
-            module_type=module_type,
-        ).to(dtype=transformer.dtype)
-        attn_processors[key] = attn_processor
-    else:
-        attn_processors[key] = value
-
-transformer.set_attn_processor(attn_processors)
-# transformer.load_state_dict(torch.load(ckpt_path), strict=False)
-
 pipe = IntermediateCogVideoXPipeline.from_pretrained(
     "THUDM/CogVideoX-5b",
-    transformer=transformer,
-    torch_dtype=torch.bfloat16,
+    torch_dtype=torch.bfloat16
 )
 
+transformer = pipe.transformer
+transformer.forward = forward.__get__(transformer, transformer.__class__)
+
+inject_and_load_motion_embedding(
+    transformer,
+    ckpt_path=ckpt_path,
+    version=version,
+    train=True,
+    interpolate_layers=list(range(42)),
+    complexity=None,
+)
+
+pipe.transformer = transformer
 pipe.to(device)
 pipe.vae.enable_tiling()
 
@@ -164,4 +143,4 @@ save_path = "test.mp4"
 export_to_video(videos[0], save_path, fps=8)
 
 intermediate = intermediate[-1].to(torch.float32)
-save_tensor_as_images(intermediate=intermediate, root="test")
+save_tensor_as_images(intermediate=intermediate, root="visualization")

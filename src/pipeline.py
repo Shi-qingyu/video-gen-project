@@ -578,14 +578,11 @@ class IntermediateCogVideoXPipeline(CogVideoXPipeline):
                 noise_pred = output.sample
 
                 if intermediate is None:
-                    intermediate = output.intermediate
+                    intermediate = output.intermediate.chunk(2)[-1]
                 else:
-                    intermediate += output.intermediate
+                    intermediate += output.intermediate.chunk(2)[-1]
 
                 noise_pred = noise_pred.float()
-
-                alpha_prod_t = self.scheduler.alphas_cumprod[t]
-                eps = (alpha_prod_t ** 0.5) * noise_pred[-1] + (1 - alpha_prod_t) ** 0.5 * latent_model_input[-1]
 
                 # perform guidance
                 if use_dynamic_cfg:
@@ -631,7 +628,7 @@ class IntermediateCogVideoXPipeline(CogVideoXPipeline):
         else:
             video = latents
         
-        intermediate = intermediate / num_inference_steps
+        intermediate = intermediate
 
         return video, intermediate
 
