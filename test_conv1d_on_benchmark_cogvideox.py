@@ -7,7 +7,7 @@ from diffusers.utils import export_to_video
 from src.new.attention_processor import SkipConv1dCogVideoXAttnProcessor2_0
 
 ROOT = "MTBench_subset/MTBench_hard"
-SAVE = "outputs_benchmark"
+SAVE = "outputs_benchmark/lr_1e-5_skipconv1d_kernel_5_mid_128_mse_1.0"
 
 os.makedirs(SAVE, exist_ok=True)
 
@@ -30,7 +30,7 @@ for key, value in transformer.attn_processors.items():
     block_idx = int(key.split(".")[1])
     if block_idx in list(range(0, 15)):
         attn_processor = SkipConv1dCogVideoXAttnProcessor2_0(
-            height=height, width=width, frames=frames, dim=dim, rank=128
+            height=height, width=width, frames=frames, dim=dim, rank=128, kernel_size=5
         ).to(dtype=transformer.dtype)
         attn_processors[key] = attn_processor
     else:
@@ -43,7 +43,7 @@ pipe.vae.enable_slicing()
 pipe.vae.enable_tiling()
 
 for subfolder in os.listdir(ROOT):
-    ckpt_path = f"checkpoints/lr_1e-5_skipconv1d_kernel_3_mid_128_mse_1.0_{subfolder}/checkpoint-500/motion_embedding.pth"
+    ckpt_path = f"checkpoints/lr_1e-5_skipconv1d_kernel_5_mid_128_mse_1.0_{subfolder}/checkpoint-500/motion_embedding.pth"
 
     pipe.transformer.load_state_dict(torch.load(ckpt_path), strict=False)
     config = "_".join(ckpt_path.split("/")[1: 3])

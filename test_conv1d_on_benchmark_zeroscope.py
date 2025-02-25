@@ -2,31 +2,25 @@ import os
 
 import torch
 from diffusers import DiffusionPipeline, DPMSolverMultistepScheduler
-from diffusers.pipelines.text_to_video_synthesis.pipeline_text_to_video_synth import TextToVideoSDPipeline
-from diffusers.models.unets.unet_3d_condition import UNet3DConditionModel
-
 from diffusers.utils import export_to_video
 
 from src.zeroscope.attention_processor import SkipAttnProcessor2_0
 
-prompt = "A tiger is walking in the forest."
-ckpt_path = "checkpoints/lr_1e-5_skipconv1d_conv1d_kernel_3_mid_128_mse_1.0_zeroscope_bear/checkpoint-300/motion_embedding.pth"
+ROOT = "MTBench_subset/MTBench_hard"
+SAVE = "outputs_benchmark/lr_1e-5_skipconv1d_kernel_3_mid_64_mse_1.0_zeroscope"
 
+os.makedirs(SAVE, exist_ok=True)
+
+seed = 42
 device = "cuda"
 weight_dtype = torch.float32
 
-rank = 128
+rank = 64
 kernel_size = 3
 
-height = 320
-width = 576
+origin_height = 320
+origin_width = 576
 frames = 24
-
-origin_height = height
-origin_width = width
-
-config = "_".join(ckpt_path.split("/")[1: 3])
-case = ckpt_path.split("/")[1].split("_")[-1]
 
 pipe = DiffusionPipeline.from_pretrained("cerspense/zeroscope_v2_576w", torch_dtype=weight_dtype)
 pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
@@ -70,14 +64,28 @@ for key, value in unet.attn_processors.items():
     attn_processors[key] = attn_processor
 
 unet.set_attn_processor(attn_processors)
-unet.load_state_dict(torch.load(ckpt_path), strict=False)
 
 pipe = pipe.to(device)
 
-video = pipe(prompt, num_inference_steps=40, height=origin_height, width=origin_width, num_frames=frames).frames[0]
+for subfolder in os.listdir(ROOT):
+    ckpt_path = f"checkpoints/lr_1e-5_skipconv1d_conv1d_kernel_3_mid_64_gas_4_mse_1.0_zeroscope_{subfolder}/checkpoint-500/motion_embedding.pth"
 
-save_dir_name = prompt.replace(" ", "_")[:-1]
-save_dir = os.path.join("outputs", save_dir_name)
-os.makedirs(save_dir, exist_ok=True)
-save_path = os.path.join(save_dir, f"{config}_{42}.mp4")
-export_to_video(video, save_path, fps=8)
+    if os.path.exists(ckpt_path):
+        pipe.unet.load_state_dict(torch.load(ckpt_path), strict=False)
+        config = "_".join(ckpt_path.split("/")[1: 3])
+
+        eval_prompt = os.path.join(ROOT, subfolder, "eval_prompts.txt")
+        with open(eval_prompt, "r") as file:
+            prompts = file.read().splitlines()
+
+        for prompt in prompts:
+            while prompt.endswith(" "):
+                prompt = prompt[:-1]
+                
+            video = pipe(prompt, num_inference_steps=40, height=origin_height, width=origin_width, num_frames=frames, generator=torch.Generator(device=device).manual_seed(42),).frames[0]
+
+            prompt = prompt.replace(" ", "_")[:-1]
+            save_dir = os.path.join(SAVE, prompt)
+            os.makedirs(save_dir, exist_ok=True)
+            save_path = os.path.join(save_dir, f"{config}_{seed}.mp4")
+            export_to_video(video, save_path, fps=8)
