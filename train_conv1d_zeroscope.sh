@@ -1,7 +1,7 @@
 #!/bin/bash
 export MODEL_PATH="cerspense/zeroscope_v2_576w"
 export DATASET_PATH="data/bear"
-export OUTPUT_PATH="checkpoints/lr_1e-5_skipconv1d_conv1d_kernel_3_mid_64_gas_1_mse_1.0_zeroscope_bear"
+export OUTPUT_PATH="checkpoints/lr_1e-5_skipconv1d_conv1d_kernel_3_mid_64_gas_4_mse_1.0_zeroscope_bear"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 
@@ -34,7 +34,7 @@ accelerate launch --config_file configs/accelerate_config_machine_single.yaml --
   --max_train_steps 500 \
   --checkpointing_steps 100 \
   --resume_from_checkpoint "" \
-  --gradient_accumulation_steps 1 \
+  --gradient_accumulation_steps 4 \
   --learning_rate 1e-5 \
   --optimizer AdamW \
   --adam_beta1 0.9 \
