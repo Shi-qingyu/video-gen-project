@@ -6,6 +6,7 @@ from typing import Optional
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 
 
 class Conv1DModule(nn.Module):
@@ -31,6 +32,72 @@ class Conv1DModule(nn.Module):
         x = self.act(x)
         x = self.conv2(x)
         return x
+
+
+class SwinTransformerBlock(nn.Module):
+    def __init__(self, dim, num_heads=48, window_size=3, shift_size=0, use_checkpoint=False):
+        super(SwinTransformerBlock, self).__init__()
+        self.dim = dim
+        self.num_heads = num_heads
+        self.window_size = window_size
+        self.shift_size = shift_size
+        self.use_checkpoint = use_checkpoint
+        self.head_dim = dim // num_heads
+
+        self.norm1 = nn.LayerNorm(dim)
+        self.qkv = nn.Linear(dim, dim * 3, bias=False)
+        self.proj = nn.Linear(dim, dim, bias=False)
+        self.norm2 = nn.LayerNorm(dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, dim * 2),
+            nn.ReLU(),
+            nn.Linear(dim * 2, dim)
+        )
+
+    def forward(self, x):
+        if self.use_checkpoint:
+            x = x + checkpoint(self._shifted_window_attention, self.norm1(x))
+            x = x + checkpoint(self.mlp, self.norm2(x))
+        else:
+            x = x + self._shifted_window_attention(self.norm1(x))
+            x = x + self.mlp(self.norm2(x))
+        return x
+
+    def _shifted_window_attention(self, x):
+        B, T, C = x.shape
+        pad_r = (self.window_size - T % self.window_size) % self.window_size
+        if pad_r > 0:
+            x = F.pad(x, (0, 0, 0, pad_r))
+        _, Tp, _ = x.shape
+
+        if self.shift_size > 0:
+            shifted_x = torch.roll(x, shifts=-self.shift_size, dims=1)
+        else:
+            shifted_x = x
+            
+        x_windows = shifted_x.view(B, Tp // self.window_size, self.window_size, C)
+        x_windows = x_windows.view(-1, self.window_size, C)
+
+        qkv = self.qkv(x_windows).reshape(-1, self.window_size, 3, self.num_heads, self.head_dim)
+        qkv = qkv.permute(2, 0, 3, 1, 4)  # (3, B*num_windows, num_heads, window_size, head_dim)
+        q, k, v = qkv[0], qkv[1], qkv[2]
+
+        attn = (q @ k.transpose(-2, -1)) * (self.head_dim ** -0.5)
+        attn = attn.softmax(dim=-1)
+        attn_output = (attn @ v).transpose(1, 2).reshape(-1, self.window_size, C)
+
+        attn_output = attn_output.view(B, Tp // self.window_size, self.window_size, C)
+        attn_output = attn_output.view(B, Tp, C)
+
+        attn_output = self.proj(attn_output)
+
+        if self.shift_size > 0:
+            attn_output = torch.roll(attn_output, shifts=self.shift_size, dims=1)
+
+        if pad_r > 0:
+            attn_output = attn_output[:, :T, :]
+        return attn_output
+
 
 
 class MLPModule(nn.Module):
@@ -282,6 +349,10 @@ class SkipConv1dCogVideoXAttnProcessor2_0(nn.Module):
             self.temporal_emb = Conv1DModule(input_channels=dim, mid_channels=rank, kernel_size=kernel_size)
         elif module_type == "mlp":
             self.temporal_emb = MLPModule(input_channels=dim, mid_channels=rank)
+        elif module_type == "swin":
+            self.temporal_emb = SwinTransformerBlock(dim=dim, window_size=kernel_size)
+        else:
+            self.temporal_emb = nn.Identity()
         
         self.store = store
         self.block_index = block_index
@@ -298,16 +369,22 @@ class SkipConv1dCogVideoXAttnProcessor2_0(nn.Module):
 
         if self.module_type == "conv1d":
             hidden_states_conv1d = hidden_states.reshape(-1, self.frames, self.height, self.width, self.dim)
-            hidden_states_conv1d = hidden_states_conv1d.permute(0, 2, 3, 4, 1).flatten(0, 2)    # [BHW, T, C]
-            hidden_states_conv1d = self.temporal_emb(hidden_states_conv1d)  # [BHW, T, C]
+            hidden_states_conv1d = hidden_states_conv1d.permute(0, 2, 3, 4, 1).flatten(0, 2)    # [BHW, C, T]
+            hidden_states_conv1d = self.temporal_emb(hidden_states_conv1d)  # [BHW, C, T]
             hidden_states_conv1d = hidden_states_conv1d.reshape(-1, self.height, self.width, self.dim, self.frames)
             hidden_states_conv1d = hidden_states_conv1d.permute(0, 4, 1, 2, 3)
-            if self.store is not None:
-                self.store[self.block_index] = self.store.get(self.block_index, 0) + hidden_states_conv1d[-1].float().detach().clone().cpu()
             hidden_states_skip = hidden_states_conv1d.flatten(1, 3)
         elif self.module_type == "mlp":
             hidden_states_mlp = self.temporal_emb(hidden_states)
             hidden_states_skip = hidden_states_mlp
+        elif self.module_type == "swin":
+            hidden_states_swin = hidden_states.reshape(-1, self.frames, self.height, self.width, self.dim)
+            hidden_states_swin = hidden_states_swin.permute(0, 2, 3, 1, 4).flatten(0, 2)    # [BHW, T, C]
+            hidden_states_swin = self.temporal_emb(hidden_states)
+            hidden_states_swin = hidden_states_swin.reshape(-1, self.height, self.width, self.frames, self.dim).permute(0, 3, 1, 2, 4)
+            hidden_states_skip = hidden_states_swin.flatten(1, 3)
+        else:
+            hidden_states_skip = 0
 
         hidden_states = torch.cat([encoder_hidden_states, hidden_states], dim=1)
 
@@ -358,6 +435,11 @@ class SkipConv1dCogVideoXAttnProcessor2_0(nn.Module):
             [text_seq_length, hidden_states.size(1) - text_seq_length], dim=1
         )
         hidden_states = hidden_states + hidden_states_skip
+
+        if self.store is not None:
+            hidden_states_store = hidden_states[-1].float().detach().clone().cpu()
+            hidden_states_store = hidden_states_store.reshape(self.frames, self.height, self.width, -1)
+            self.store[self.block_index] = self.store.get(self.block_index, 0) + hidden_states_store
 
         return hidden_states, encoder_hidden_states
 
