@@ -16,7 +16,6 @@ class VisAttnMapCogVideoXAttnProcessor2_0(CogVideoXAttnProcessor2_0):
         self.layer_idx = block_idx
         self.attention_store = None
         
-
     def get_attention_scores(
         self, 
         attn: Attention, 
@@ -234,13 +233,10 @@ class NewVisAttnMapCogVideoXAttnProcessor2_0(nn.Module):
                 self.frames, self.height, self.width, -1 
             )
             attention_map = attention_map.detach().clone().cpu()
-            self.attention_store.store(self.layer_idx, attention_map)
+            self.attention_store.store(self.layer_idx, attention_map)   # (hw, len(word_ids))
         else:
-            attention_map = attention_map.reshape(
-                self.height, self.width, -1
-            )
             attention_map = attention_map.detach().clone().cpu()
-            self.attention_store.store(self.layer_idx, attention_map)
+            self.attention_store.store(self.layer_idx, attention_map)   # (hw, thw)
 
     def __call__(
         self,
@@ -311,13 +307,14 @@ class NewVisAttnMapCogVideoXAttnProcessor2_0(nn.Module):
 
             # (bs * h, len_q, len_k)
             attention_probs = attn.get_attention_scores(query_chunk, key, attention_mask=attention_mask)
+            # skip text embedding queries
             if i != 0:
                 if self.word_ids is not None:
                     word_ids = torch.tensor(self.word_ids, device=query.device).to(torch.int32)
-                    attention_maps.append(attention_probs[attn.heads:, :, word_ids].mean(0))  # (1350)
+                    attention_maps.append(attention_probs[attn.heads:, :, word_ids].mean(0))  # (hw, len(word_ids))
                 else:
                     if i == self.query_frame_ids:
-                        attention_maps.append(attention_probs[attn.heads:, :, text_seq_length:].mean(0)) # (1350, 17550)
+                        attention_maps.append(attention_probs[attn.heads:, :, text_seq_length:].mean(0)) # (hw, thw)
 
             hidden_states_chunk = torch.bmm(attention_probs, value)
             hidden_states_chunk = hidden_states_chunk.reshape(-1, attn.heads, *hidden_states_chunk.shape[1:])
@@ -326,7 +323,7 @@ class NewVisAttnMapCogVideoXAttnProcessor2_0(nn.Module):
             start_idx = end_idx
         
         hidden_states = torch.cat(hidden_states_chunks, dim=1)   # (bs, seq_len, dim)
-        attention_map = torch.cat(attention_maps, dim=0) # concat all of the frames
+        attention_map = torch.cat(attention_maps, dim=0) # do nothing, equal to attention_maps[0]
         self.store_attention_map(
             attention_map=attention_map, 
             store_text_cross_attention=self.word_ids is not None,

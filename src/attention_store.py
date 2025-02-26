@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 import abc
 
@@ -19,7 +21,7 @@ class AttentionStore():
             store[str(i)] = []
         return store
 
-    def store(self, layer_idx: str, attention_map: torch.Tensor):
+    def store(self, layer_idx: Optional[str], attention_map: torch.Tensor):
         if not isinstance(layer_idx, str):
             layer_idx = str(layer_idx)
         
@@ -33,4 +35,4 @@ class AttentionStore():
     
     def integrate_attn_map(self):
         for key, value in self.attention_store.items(): 
-            self.attention_store[key] = sum(value)  # (t, h, w, n)
+            self.attention_store[key] = sum(value)  # (hw, thw) or (hw, len(word_ids))

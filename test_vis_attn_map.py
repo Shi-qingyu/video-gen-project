@@ -1,6 +1,6 @@
-from src.pipeline import VisAttnMapCogVideoXPipeline
-from src.transformer import VisAttnMapCogVideoXTransformer3DModel
 from src.attention_store import AttentionStore
+from src.attention_processor import NewVisAttnMapCogVideoXAttnProcessor2_0
+from src.utils import prepare_word_ids
 
 import os
 import matplotlib.pyplot as plt
@@ -19,11 +19,10 @@ from diffusers import AutoencoderKLCogVideoX, CogVideoXDPMScheduler, CogVideoXPi
 prompt = "A woman wearing blue dress is dancing on the ground in front of a lot of person."
 negative_prompt = ""
 words = ["woman"]
-frame_idx_as_query = 2  # from 1 to 13
-pos = [15, 23]
+query_frame_ids = 3  # from 1 to 13
 seed = 42
-save_text_attention = False
-device = "cuda:2"
+save_text_attention = False if query_frame_ids is not None else True
+device = "cuda"
 
 NUM_INFERENCE_STEPS = 50
 ROOT = "attention_map"
@@ -56,24 +55,43 @@ def save_single_layer_attn_map(layer_idx: int, pos):
         attn_map = attn_maps[frame_idx].to(torch.uint8)
         save_path = os.path.join(attention_map_dir, f"{pos[0]}_{pos[1]}_{frame_idx}.png")
         write_png(attn_map, save_path)
-        
 
-transformer = VisAttnMapCogVideoXTransformer3DModel.from_pretrained(
+
+pipe = CogVideoXPipeline.from_pretrained(
     "THUDM/CogVideoX-5b",
-    subfolder="transformer",
     torch_dtype=torch.bfloat16
 )
+
+word_ids = prepare_word_ids(prompt=prompt, words=words, tokenizer=pipe.tokenizer)
+if query_frame_ids is not None:
+    word_ids = None
+
+transformer: CogVideoXTransformer3DModel = pipe.transformer
+height = transformer.config.sample_height // transformer.config.patch_size
+width = transformer.config.sample_width // transformer.config.patch_size
+frames = transformer.config.sample_frames // transformer.config.temporal_compression_ratio + 1
+dim = transformer.config.num_attention_heads * transformer.config.attention_head_dim
 
 attention_store = AttentionStore(NUM_INFERENCE_STEPS, transformer.config.num_layers)
 
-for attn_processor in transformer.attn_processors.values():
-    attn_processor.attention_store = attention_store
-
-pipe = VisAttnMapCogVideoXPipeline.from_pretrained(
-    "THUDM/CogVideoX-5b",
-    transformer=transformer,
-    torch_dtype=torch.bfloat16
-)
+attn_processors = {}
+for key, value in transformer.attn_processors.items():
+    block_index = int(key.split(".")[1])
+    attn_processor = NewVisAttnMapCogVideoXAttnProcessor2_0(
+        height=height,
+        width=width,
+        frames=frames,
+        dim=dim,
+        rank=128,
+        kernel_size=3,
+        module_type="conv1d",
+        block_idx=block_index,
+        word_ids=word_ids,
+        query_frame_ids=query_frame_ids,
+        attention_store=attention_store,
+    ).to(transformer.dtype)
+    attn_processors[key] = attn_processor
+transformer.set_attn_processor(attn_processors)
 
 pipe.vae.enable_tiling()
 pipe.to(device)
@@ -84,9 +102,6 @@ video = pipe(
     latents=latents,
     prompt=prompt,
     negative_prompt=negative_prompt,
-    words=words,
-    frame_idx_as_query=frame_idx_as_query,
-    save_text_attention=save_text_attention,
     num_videos_per_prompt=1,
     num_inference_steps=NUM_INFERENCE_STEPS,
     num_frames=49,
@@ -98,46 +113,50 @@ save_name = prompt.replace(" ", "_").replace(".", "")
 save_root = os.path.join(ROOT, save_name)
 os.makedirs(save_root, exist_ok=True)
 
-video_path = os.path.join(save_root, "video.mp4")
+video_path = os.path.join(save_root, "visualization_attn_map.mp4")
 export_to_video(video, video_path, fps=8)
 
 attention_map = 0
 for value in attention_store.attention_store.values():
-    attention_map += value
+    attention_map += value  # [hw, thw]
 
-attention_map = attention_map.flatten(0, 1)
+torch.save(attention_store.attention_store, "attention_map.pth")
+
 f_idx = 0
 for i in range(0, 17550, 1350):
     cross_frame_attention_map = attention_map[:, i: i+1350].to(torch.float32)
-    # 将tensor转换为numpy数组
     data = cross_frame_attention_map.numpy()
 
-    # 创建热力图
-    plt.figure(figsize=(10, 10))  # 可以调整热力图大小
-    sns.heatmap(data, cmap='YlGnBu', cbar=True)
+    plt.figure(figsize=(10, 10))
+    
+    # Plot heatmap with dark color map
+    sns.heatmap(data, cmap='dark:blue', cbar=True, cbar_kws={'label': 'Intensity'})
+    
+    # Adjust ticks to be spaced by 500
+    plt.xticks(ticks=range(0, data.shape[1], 500), labels=range(0, data.shape[1], 500))
+    plt.yticks(ticks=range(0, data.shape[0], 500), labels=range(0, data.shape[0], 500))
 
-    # 保存为jpg文件
+    # Save the figure
     plt.savefig(f'{f_idx}.jpg', format='jpg', dpi=300, bbox_inches='tight')
     f_idx += 1
 
+# if save_text_attention:
+#     attention_map_dir = os.path.join(save_root, "text_attn_maps")
+#     os.makedirs(attention_map_dir, exist_ok=True)
+#     save_text_attention_map(attention_store.attention_store, attention_map_dir)
+# else:
+#     for i in range(42):
+#         save_single_layer_attn_map(layer_idx=i, pos=pos)
 
-if save_text_attention:
-    attention_map_dir = os.path.join(save_root, "text_attn_maps")
-    os.makedirs(attention_map_dir, exist_ok=True)
-    save_text_attention_map(attention_store.attention_store, attention_map_dir)
-else:
-    for i in range(42):
-        save_single_layer_attn_map(layer_idx=i, pos=pos)
-
-attention_map_dir = attention_map_dir.replace("attn_maps", "single_attn_maps")
-os.makedirs(attention_map_dir, exist_ok=True)
-single_frame_attn_map = attention_store.attention_store["41"]
-pixel_pos = (15, 22)
-attn_maps = single_frame_attn_map[pixel_pos[0], pixel_pos[1]].reshape(13, 1, 30, 45)
-attn_maps = (attn_maps - attn_maps.min()) / (attn_maps.max() - attn_maps.min())
-attn_maps = attn_maps * 255
-attn_maps = F.interpolate(attn_maps, size=(480, 720), mode="bilinear")
-for i in range(len(attn_maps)):
-    attn_map = attn_maps[i].to(torch.uint8)
-    save_path = os.path.join(attention_map_dir, f"{pixel_pos[0]}_{pixel_pos[1]}_{i}.png")
-    write_png(attn_map, save_path)
+# attention_map_dir = attention_map_dir.replace("attn_maps", "single_attn_maps")
+# os.makedirs(attention_map_dir, exist_ok=True)
+# single_frame_attn_map = attention_store.attention_store["41"]
+# pixel_pos = (15, 22)
+# attn_maps = single_frame_attn_map[pixel_pos[0], pixel_pos[1]].reshape(13, 1, 30, 45)
+# attn_maps = (attn_maps - attn_maps.min()) / (attn_maps.max() - attn_maps.min())
+# attn_maps = attn_maps * 255
+# attn_maps = F.interpolate(attn_maps, size=(480, 720), mode="bilinear")
+# for i in range(len(attn_maps)):
+#     attn_map = attn_maps[i].to(torch.uint8)
+#     save_path = os.path.join(attention_map_dir, f"{pixel_pos[0]}_{pixel_pos[1]}_{i}.png")
+#     write_png(attn_map, save_path)
