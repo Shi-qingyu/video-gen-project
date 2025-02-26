@@ -19,12 +19,12 @@ SEED = 0
 
 prompt = "An astronaut is dancing on mars."
 device = "cuda"
-ckpt_path = "checkpoints/lr_1e-5_skipconv1d_conv1d_kernel_3_mid_128_mse_1.0_tracking_loss_1e-1_dance-twirl/checkpoint-500/motion_embedding.pth"
+ckpt_path = "checkpoints/lr_1e-5_skipconv1d_mlp_mid_128_kernel_3_mse_1.0_dance-twirl/checkpoint-500/motion_embedding.pth"
 rank = 128
 kernel_size = 3
-module_type = "conv1d"
+module_type = "mlp"
 
-intermediate_layer = 28
+intermediate_layer = 1
 
 
 @dataclass
@@ -32,7 +32,7 @@ class Transformer2DModelOutput(BaseOutput):
     """
     The output of [`Transformer2DModel`].
 
-    Args:
+    Args: 
         sample (`torch.Tensor` of shape `(batch_size, num_channels, height, width)` or `(batch size, num_vector_embeds - 1, num_latent_pixels)` if [`Transformer2DModel`] is discrete):
             The hidden states output conditioned on the `encoder_hidden_states` input. If discrete, returns probability
             distributions for the unnoised latent pixels.
@@ -167,9 +167,9 @@ save_path = "test.mp4"
 export_to_video(videos[0], save_path, fps=8)
 
 intermediate = intermediate[-1].to(torch.float32)   # [F, H, W, C]
-save_tensor_as_images(intermediate=intermediate, root="visualization")
+save_tensor_as_images(intermediate=intermediate, root="visualization/dit_feature/w_conv1d")
 
 for key, value in store.items():
     value = value.to(torch.float32)
-    root = "visualization/" + f"block_{key}"
+    root = "visualization/dit_feature/w_conv1d/" + f"block_{key}"
     save_tensor_as_images(intermediate=value, root=root)
