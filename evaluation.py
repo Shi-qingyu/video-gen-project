@@ -197,6 +197,17 @@ def calculate_clip(model, processor, text, images_or_path):
     return logits_per_image
 
 
+def calculate_clip_single(text, images_or_video_path):
+    model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+    processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+
+    with torch.no_grad():
+        logits_per_image = calculate_clip(model, processor, text, images_or_video_path)
+        clip_score = logits_per_image.mean().item()
+    
+    return clip_score
+
+
 def CLIP_Score(root="", device="cuda"):
     model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
     processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
@@ -273,10 +284,7 @@ def temporal_consistency(root="", device="cuda"):
     return dino_score / cnt
 
 
-if __name__ == "__main__":
-    benchmark_root = "./data"
-    generated_video_root = "outputs_benchmark/lr_1e-5_skipconv1d_conv1d_mid_128_kernel_3_mse_1.0"
-
+def MTBench(benchmark_root, generated_video_root):
     motion_fidelity_score = motion_fidelity(benchmark_root, generated_video_root, "../../track/co-tracker/checkpoints/scaled_offline.pth")
     clip_score = CLIP_Score(generated_video_root)
     temporal_consistency_score = temporal_consistency(generated_video_root)
@@ -284,3 +292,7 @@ if __name__ == "__main__":
     print(f"Motion Fidelity: {motion_fidelity_score}")
     print(f"CLIP Score: {clip_score}")
     print(f"Temporal Consistency Score: {temporal_consistency_score}")
+
+
+if __name__ == "__main__":
+    MTBench("./data", "outputs_benchmark/lr_1e-5_skipconv1d_kernel_3_mid_64_mse_1.0_zeroscope")
