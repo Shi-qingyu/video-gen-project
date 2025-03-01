@@ -7,10 +7,11 @@ from diffusers.utils import export_to_video
 from src.new.attention_processor import SkipConv1dCogVideoXAttnProcessor2_0, AttentionConv1dCogVideoXAttnProcessor2_0, KVConv1dCogVideoXAttnProcessor2_0
 
 
-prompt = "A deer running through a series of red and white barriers."
-seed = 42
+prompt = "An astronaut is dancing on mars."
+negative_prompt = ""
+seed = 0
 device = "cuda"
-ckpt_path = "checkpoints/lr_1e-5_skipconv1d_conv1d_mid_128_kernel_3_mse_1.0_tracking_loss_1e-1_dog-agility/checkpoint-500/motion_embedding.pth"
+ckpt_path = "checkpoints/lr_1e-5_skipconv1d_conv1d_kernel_3_mid_128_gas_1_mse_1.0_dance-twirl/checkpoint-500/motion_embedding.pth"
 rank = 128
 kernel_size = 3
 module_type = "conv1d"
@@ -20,7 +21,7 @@ case = ckpt_path.split("/")[1].split("_")[-1]
 
 pipe = CogVideoXPipeline.from_pretrained(
     "THUDM/CogVideoX-5b",
-    torch_dtype=torch.bfloat16
+    torch_dtype=torch.bfloat16 
 ).to(device)
 
 transformer = pipe.transformer
@@ -60,11 +61,11 @@ for i in range(32):
         num_inference_steps=50,
         num_frames=49,
         guidance_scale=6,
-        generator=torch.Generator(device=device).manual_seed(42),
+        generator=torch.Generator(device=device).manual_seed(i),
     ).frames[0]
 
     save_dir_name = prompt.replace(" ", "_")[:-1]
     save_dir = os.path.join("outputs", save_dir_name)
     os.makedirs(save_dir, exist_ok=True)
-    save_path = os.path.join(save_dir, f"{config}_{42}.mp4")
+    save_path = os.path.join(save_dir, f"{config}_{i}.mp4")
     export_to_video(video, save_path, fps=8)

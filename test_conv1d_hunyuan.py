@@ -9,7 +9,7 @@ from src.new.attention_processor import SkipConv1dHunyuanVideoAttnProcessor2_0
 
 device = "cuda"
 
-prompt = "An astronaut is dancing on mars."
+prompt = "A gorilla is dancing on the grassland."
 
 ckpt_path = "checkpoints/lr_1e-5_skipconv1d_kernel_5_mid_128_warmup_100_gas_1_mse_1.0_512x768_hunyuan_dance-twirl/checkpoint-500/motion_embedding.pth"
 rank = 128
@@ -21,7 +21,7 @@ video_width = 768
 max_num_frames = 49
 seed=42
 
-config = "_".join(ckpt_path.split("/")[1: 3]) + "_0-17" + "_dual"
+config = "_".join(ckpt_path.split("/")[1: 3]) + "_0-20" + "_dual"
 
 model_id = "hunyuanvideo-community/HunyuanVideo"
 
@@ -47,7 +47,7 @@ for key, value in transformer.attn_processors.items():
 
     block_idx = int(key.split(".")[-3])
 
-    if block_idx in list(range(17)):
+    if block_idx in list(range(20)):
         attn_processor = attn_processor_type(
             height=height, 
             width=width, 

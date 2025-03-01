@@ -6,7 +6,7 @@ from diffusers.utils import export_to_video
 
 from src.zeroscope.attention_processor import SkipAttnProcessor2_0
 
-ROOT = "MTBench_subset/MTBench_hard"
+ROOT = "MTBench_subset/MTBench_easy"
 SAVE = "outputs_benchmark/lr_1e-5_skipconv1d_kernel_3_mid_64_mse_1.0_zeroscope"
 
 os.makedirs(SAVE, exist_ok=True)
