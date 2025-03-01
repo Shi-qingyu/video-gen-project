@@ -578,15 +578,6 @@ class VideoDataset(Dataset):
             trajectory = trajectory[: self.max_num_frames]
             selected_num_frames = frames.shape[0]
 
-            # Choose first (4k + 1) frames as this is how many is required by the VAE
-            remainder = (3 + (selected_num_frames % 4)) % 4
-            if remainder != 0:
-                frames = frames[:-remainder]
-                trajectory = trajectory[:-remainder]
-            selected_num_frames = frames.shape[0]
-
-            assert (selected_num_frames - 1) % 4 == 0
-
             # Training transforms
             frames = frames.float()
             frames = torch.stack([train_transforms(frame) for frame in frames], dim=0)
@@ -970,7 +961,7 @@ def main(args):
 
     attn_processors = {}
     for key, value in unet.attn_processors.items():
-        if "temp" not in key:
+        if "attn2" in key and "temp" not in key:
             attn_processors[key] = value
             continue
 
@@ -991,12 +982,17 @@ def main(args):
             width = args.width // 8 // (2 ** 3)
             dim = model_config.block_out_channels[-1]
             frames = args.max_num_frames
+        else:
+            attn_processors[key] = value
+            continue
+
 
         attn_processor = attn_processor_type(
             height=height, 
             width=width, 
             frames=frames, 
             dim=dim, 
+            is_temp="temp" in key,
             rank=args.rank,
             kernel_size=args.kernel_size,
         ).to(accelerator.device, dtype=weight_dtype)

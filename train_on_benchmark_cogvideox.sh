@@ -4,7 +4,7 @@
 set -e
 
 # Define the base directories
-BASE_DATA_DIR="./MTBench_subset/MTBench_medium"
+BASE_DATA_DIR="./MTBench_subset/MTBench_hard"
 BASE_OUTPUT_DIR="checkpoints"
 
 # Define the model path
@@ -43,7 +43,7 @@ for DATASET_SUBDIR in "$BASE_DATA_DIR"/*/; do
 
         # Execute the training command
         accelerate launch --config_file configs/accelerate_config_machine_single.yaml --main_process_port 8003 --multi_gpu \
-            train_conv1d.py \
+            train_conv1d_cogvideox.py \
             --gradient_checkpointing \
             --use_8bit_adam  \
             --pretrained_model_name_or_path $MODEL_PATH \
@@ -69,7 +69,7 @@ for DATASET_SUBDIR in "$BASE_DATA_DIR"/*/; do
             --max_train_steps 500 \
             --checkpointing_steps 100 \
             --resume_from_checkpoint "" \
-            --gradient_accumulation_steps 4 \
+            --gradient_accumulation_steps 1 \
             --learning_rate 1e-5 \
             --optimizer AdamW \
             --adam_beta1 0.9 \
