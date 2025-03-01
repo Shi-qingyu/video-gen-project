@@ -36,7 +36,7 @@ class SkipAttnProcessor2_0(nn.Module):
     Processor for implementing scaled dot-product attention (enabled by default if you're using PyTorch 2.0).
     """
 
-    def __init__(self, height, width, frames, dim, rank, kernel_size):
+    def __init__(self, height, width, frames, dim, is_temp, rank, kernel_size):
         if not hasattr(F, "scaled_dot_product_attention"):
             raise ImportError("AttnProcessor2_0 requires PyTorch 2.0, to use it, please upgrade PyTorch to 2.0.")
         super(SkipAttnProcessor2_0, self).__init__()
@@ -45,6 +45,7 @@ class SkipAttnProcessor2_0(nn.Module):
         self.frames = frames
         self.dim = dim
 
+        self.is_temp = is_temp
         self.temporal_emb = Conv1DModule(input_channels=dim, mid_channels=rank, kernel_size=kernel_size)
 
     def __call__(
@@ -59,9 +60,19 @@ class SkipAttnProcessor2_0(nn.Module):
     ) -> torch.Tensor:
         residual = hidden_states
 
-        batch_size_height_width, num_frames, dim = hidden_states.shape
-        hidden_states_skip = self.temporal_emb(hidden_states.permute(0, 2, 1))
-        hidden_states_skip = hidden_states_skip.permute(0, 2, 1)
+        if self.is_temp:
+            batch_size_height_width, num_frames, dim = hidden_states.shape
+            hidden_states_skip = hidden_states.permute(0, 2, 1)
+            hidden_states_skip = self.temporal_emb(hidden_states_skip)   # [bhw, c, f]
+            hidden_states_skip = hidden_states_skip.permute(0, 2, 1)    # [bhw, f, c]
+        else:
+            batch_size_frames, height_width, dim = hidden_states.shape
+            hidden_states_skip = hidden_states.reshape(-1, self.frames, self.height, self.width, dim)
+            hidden_states_skip = hidden_states_skip.permute(0, 2, 3, 4, 1).flatten(0, 2)
+            hidden_states_skip = self.temporal_emb(hidden_states_skip)
+            hidden_states_skip = hidden_states_skip.reshape(-1, self.height, self.width, dim, self.frames)
+            hidden_states_skip = hidden_states_skip.permute(0, 4, 1, 2, 3)
+            hidden_states_skip = hidden_states_skip.flatten(0, 1).flatten(1, 2) # [bf, hw, c]
 
         if attn.spatial_norm is not None:
             hidden_states = attn.spatial_norm(hidden_states, temb)

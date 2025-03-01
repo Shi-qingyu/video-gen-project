@@ -9,8 +9,8 @@ from diffusers.utils import export_to_video
 
 from src.zeroscope.attention_processor import SkipAttnProcessor2_0
 
-prompt = "A lion walking on a sandy path in a wildlife reserve."
-ckpt_path = "checkpoints/lr_1e-5_skipconv1d_conv1d_kernel_3_mid_64_gas_1_mse_1.0_zeroscope_bear/checkpoint-500/motion_embedding.pth"
+prompt = "A woman riding a zebra is jumping over a fence."
+ckpt_path = "checkpoints/lr_1e-5_skipconv1d_conv1d_kernel_3_mid_64_gas_1_mse_1.0_zeroscope_horsejump-high/checkpoint-500/motion_embedding.pth"
 
 device = "cuda"
 weight_dtype = torch.float32
@@ -35,7 +35,7 @@ model_config = unet.config
 
 attn_processors = {}
 for key, value in unet.attn_processors.items():
-    if "temp" not in key:
+    if "attn2" in key and "temp" not in key:
         attn_processors[key] = value
         continue
 
@@ -56,17 +56,19 @@ for key, value in unet.attn_processors.items():
         width = origin_width // 8 // (2 ** 3)
         dim = model_config.block_out_channels[-1]
         frames = frames
+    else:
+        attn_processors[key] = value
+        continue
 
     attn_processor = SkipAttnProcessor2_0(
         height=height, 
         width=width, 
         frames=frames, 
         dim=dim, 
+        is_temp="temp" in key,
         rank=rank,
         kernel_size=kernel_size,
     ).to(device, dtype=weight_dtype)
-    for param in attn_processor.parameters():
-        param.requires_grad_(True)
     attn_processors[key] = attn_processor
 
 unet.set_attn_processor(attn_processors)
@@ -74,10 +76,11 @@ unet.load_state_dict(torch.load(ckpt_path), strict=False)
 
 pipe = pipe.to(device)
 
-video = pipe(prompt, num_inference_steps=40, height=origin_height, width=origin_width, num_frames=frames, generator=torch.Generator(device=device).manual_seed(42),).frames[0]
+for i in range(32):
+    video = pipe(prompt, num_inference_steps=40, height=origin_height, width=origin_width, num_frames=frames, generator=torch.Generator(device=device).manual_seed(i),).frames[0]
 
-save_dir_name = prompt.replace(" ", "_")[:-1]
-save_dir = os.path.join("outputs", save_dir_name)
-os.makedirs(save_dir, exist_ok=True)
-save_path = os.path.join(save_dir, f"{config}_{42}.mp4")
-export_to_video(video, save_path, fps=8)
+    save_dir_name = prompt.replace(" ", "_")[:-1]
+    save_dir = os.path.join("outputs", save_dir_name)
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, f"{config}_{i}.mp4")
+    export_to_video(video, save_path, fps=8)
