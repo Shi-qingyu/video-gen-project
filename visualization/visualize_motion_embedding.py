@@ -19,9 +19,9 @@ from utils import save_tensor_as_images
 
 SEED = 42
 
-prompt = "An astronaut is dancing on mars."
+prompt = "A man riding a lion is jumping over a fence."
 device = "cuda"
-ckpt_path = "checkpoints/lr_1e-3_spatial_temporal_dance-twirl/checkpoint-500/motion_embedding.pth"
+ckpt_path = "checkpoints/lr_1e-3_spatial_temporal_horsejump-high/checkpoint-500/motion_embedding.pth"
 version = "spatial_temporal"
 
 intermediate_layer = 1
