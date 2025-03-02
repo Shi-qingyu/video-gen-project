@@ -6,78 +6,135 @@ from pathlib import Path
 from collections import Counter
 import re
 
-# 下载必要的NLTK数据
-nltk.download('stopwords')
-nltk.download('averaged_perceptron_tagger')
-nltk.download('punkt')
 
-# 定义数据目录
-root = Path("./data")
+# nltk.download('stopwords')
+# nltk.download('averaged_perceptron_tagger')
+# nltk.download('punkt')
 
-# 初始化文本列表
-text_list = []
+# root = Path("./data")
 
-# 遍历目录并读取文件
-for case in root.iterdir():
-    prompt_file = case.joinpath("prompts.txt")
-    with open(prompt_file.as_posix(), "r") as file:
-        prompt = file.read().strip()
+# text_list = []
 
-    eval_file = case.joinpath("eval_prompts.txt")
-    with open(eval_file.as_posix(), "r") as file:
-        prompts = [prompt.strip() for prompt in file.readlines()]
+# for case in root.iterdir():
+#     prompt_file = case.joinpath("prompts.txt")
+#     with open(prompt_file.as_posix(), "r") as file:
+#         prompt = file.read().strip()
 
-    text_list.append(prompt)
-    text_list.extend(prompts)
+#     eval_file = case.joinpath("eval_prompts.txt")
+#     with open(eval_file.as_posix(), "r") as file:
+#         prompts = [prompt.strip() for prompt in file.readlines()]
 
-# 将所有文本合并成一个字符串
-all_text = ' '.join(text_list)
+#     text_list.append(prompt)
+#     text_list.extend(prompts)
 
-# 清理文本
-def clean_text(text):
-    text = re.sub(r'[^\w\s]', '', text)  # 去除标点符号
-    text = text.lower()  # 转换为小写
-    return text
+# all_text = ' '.join(text_list)
 
-all_text = clean_text(all_text)
+# def clean_text(text):
+#     text = re.sub(r'[^\w\s]', '', text)
+#     text = text.lower()
+#     return text
 
-# 提取动词
-def extract_verbs(text):
-    # 分词并标注词性
-    words = nltk.word_tokenize(text)
-    pos_tags = nltk.pos_tag(words)
+# all_text = clean_text(all_text)
+
+# def extract_verbs(text):
+#     words = nltk.word_tokenize(text)
+#     pos_tags = nltk.pos_tag(words)
     
-    # 提取动词（VB, VBD, VBG, VBN, VBP, VBZ）
-    verbs = [word for word, pos in pos_tags if pos.startswith('VB')]
-    return verbs
+#     verbs = [word for word, pos in pos_tags if pos.startswith('VB')]
+#     return verbs
 
-# 提取所有动词
-verbs = extract_verbs(all_text)
+# verbs = extract_verbs(all_text)
 
-# 统计词频
-verb_freq = Counter(verbs)
+# verb_freq = Counter(verbs)
 
-# 将词频转换为字典格式，用于WordCloud
-freq_dict = dict(verb_freq)
+# freq_dict = dict(verb_freq)
 
-del freq_dict["is"]
+# del freq_dict["is"]
+# del freq_dict["are"]
+# del freq_dict["be"]
 
-# 扩展停用词列表
+freq_dict = {
+  'walk': 90,
+  'hold': 84,
+  'throw': 6,
+  'stand': 55,
+  'participate': 2,
+  'drive': 51,
+  'compete': 2,
+  'transport': 1,
+  'race': 8,
+  'talk': 7,
+  'interact': 6,
+  'mix': 1,
+  'wear': 27,
+  'work': 1,
+  'read': 1,
+  'grade': 1,
+  'drink': 1,
+  'take': 8,
+  'give': 1,
+  'stretch': 1,
+  'play': 12,
+  'hit': 6,
+  'bend': 6,
+  'adjust': 6,
+  'fix': 6,
+  'dance': 36,
+  'run': 13,
+  'engage': 1,
+  'scale': 1,
+  'navigate': 15,
+  'secure': 1,
+  'descend': 1,
+  'perform': 20,
+  'ride': 109,
+  'wind': 2,
+  'paraglide': 6,
+  'soar': 6,
+  'come': 3,
+  'rise': 3,
+  'swirl': 2,
+  'trail': 2,
+  'flow': 1,
+  'skateboard': 5,
+  'push': 3,
+  'guide': 1,
+  'support': 1,
+  'assist': 1,
+  'carry': 7,
+  'windsurf': 6,
+  'box': 1,
+  'observe': 6,
+  'fence': 1,
+  'spar': 1,
+  'billow': 1,
+  'drift': 1,
+  'cycle': 1,
+  'negotiate': 1,
+  'maneuver': 1,
+  'handle': 1,
+  'tackle': 1,
+  'rest': 1,
+  'shade': 1,
+  'travel': 6,
+  'line': 1,
+  'paint': 1,
+  'adorn': 1
+}
+
 extra_stopwords = {'be', 'is', 'are', 'am', 'was', 'were', 'have', 'has', 'had', 'do', 'does', 'did'}
 stop_words = set(stopwords.words('english')).union(extra_stopwords)
 
-# 生成词云
 wordcloud = WordCloud(
     background_color='white',
     stopwords=stop_words,
     width=800,
-    height=400,
+    height=600,
     max_words=100
-).generate_from_frequencies(freq_dict)  # 使用词频生成词云
+).generate_from_frequencies(freq_dict)
 
-# 显示并保存词云
-plt.figure(figsize=(10, 5))
+plt.figure(figsize=(12, 8))
 plt.imshow(wordcloud, interpolation='bilinear')
-plt.axis('off')  # 不显示横纵坐标
-plt.savefig("test.jpg")  # 保存词云为图片
+plt.axis('off')
+plt.savefig("test.jpg")
 plt.show()
