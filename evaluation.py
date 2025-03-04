@@ -90,7 +90,7 @@ def get_cosine_similarity_score(tracklets1, tracklets2):
     tracklets2 = tracklets2 / tracklets2.norm(dim=-1, keepdim=True)
 
     similarity_matrix = torch.einsum("ntc, mtc -> nmt", tracklets1, tracklets2).mean(dim=-1)    # [N, M]
-    similarity_matrix_eye = similarity_matrix - torch.eye(similarity_matrix.shape[0]).to(similarity_matrix.device)
+    similarity_matrix_eye = similarity_matrix
 
     return similarity_matrix_eye
 
@@ -160,11 +160,14 @@ def motion_fidelity(data_root, gen_root, offline_cotracker_model_path, device="c
                         cosine_similarity_matrix = get_cosine_similarity_score(gen_tracklets, original_tracklets)
 
                         if add_frechet_score:
-                            frechet_similarity_matrix = get_frechet_similarity_score(gen_tracklets, original_tracklets)
+                            ids = torch.randint(0, gen_tracklets.shape[0], size=(50,))
+                            frechet_gen_tracklets = gen_tracklets[ids]
+                            frechet_original_tracklets = original_tracklets[ids]
+                            frechet_similarity_matrix = get_frechet_similarity_score(frechet_gen_tracklets, frechet_original_tracklets)
                             frechet_similarity_matrix = torch.from_numpy(frechet_similarity_matrix).to(cosine_similarity_matrix.device)
 
                             # for each row find the most similar element
-                            max_similarity, _ = (0.5 * cosine_similarity_matrix + 0.5 * frechet_similarity_matrix).max(dim=1)
+                            max_similarity = 0.8 * cosine_similarity_matrix.max(dim=1)[0].mean() + 0.2 * frechet_similarity_matrix.max(dim=1)[0].mean()
                         else:
                             max_similarity, _ = cosine_similarity_matrix.max(dim=1)
 
@@ -285,7 +288,7 @@ def temporal_consistency(root="", device="cuda"):
 
 
 def MTBench(benchmark_root, generated_video_root):
-    motion_fidelity_score = motion_fidelity(benchmark_root, generated_video_root, "../../track/co-tracker/checkpoints/scaled_offline.pth")
+    motion_fidelity_score = motion_fidelity(benchmark_root, generated_video_root, offline_cotracker_model_path="../../track/co-tracker/checkpoints/scaled_offline.pth", add_frechet_score=False)
     clip_score = CLIP_Score(generated_video_root)
     temporal_consistency_score = temporal_consistency(generated_video_root)
 
@@ -295,4 +298,4 @@ def MTBench(benchmark_root, generated_video_root):
 
 
 if __name__ == "__main__":
-    MTBench("./data", "outputs_benchmark/lr_1e-5_skipconv1d_kernel_3_mid_64_mse_1.0_zeroscope")
+    MTBench("./data", "outputs_benchmark/results_MotionClone")
