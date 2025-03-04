@@ -226,7 +226,7 @@ def forward(
 
 if __name__ == "__main__":
     noise_timestep = 500
-    intermediate_layer = 1
+    intermediate_layer = 28
     
     tokenizer, text_encoder, vae, scheduler, transformer = load_models("THUDM/CogVideoX-5b")
 
@@ -239,95 +239,98 @@ if __name__ == "__main__":
     
     root = "./MTBench_subset/MTBench_hard"
     for file_name in os.listdir(root):
-        file_path = f"data/{file_name}/videos/{file_name}.mp4"
-        with open(f"data/{file_name}/prompts.txt") as file:
-            prompt = file.read().strip()
+        if file_name == "dance-twirl":
+            print(file_name)
+            file_path = f"data/{file_name}/videos/{file_name}.mp4"
+            with open(f"data/{file_name}/prompts.txt") as file:
+                prompt = file.read().strip()
 
-        with torch.no_grad():
-            video = read_video_from_file(file_path)
-            num_frames, _, height, width = video.shape
-            video = video[None]
+            with torch.no_grad():
+                video = read_video_from_file(file_path)
+                num_frames, _, height, width = video.shape
+                video = video[None]
 
-            latent_dist = vae.encode(video.permute(0, 2, 1, 3, 4).to(vae.device)).latent_dist
-            latent = latent_dist.sample() * vae.config.scaling_factor   # [B, C, f, h, w]
-            
-            model_input = latent.permute(0, 2, 1, 3, 4).to(transformer.dtype)
-            batch_size, num_frames, num_channels, _, _ = model_input.shape
+                latent_dist = vae.encode(video.permute(0, 2, 1, 3, 4).to(vae.device)).latent_dist
+                latent = latent_dist.sample() * vae.config.scaling_factor   # [B, C, f, h, w]
+                
+                model_input = latent.permute(0, 2, 1, 3, 4).to(transformer.dtype)
+                batch_size, num_frames, num_channels, _, _ = model_input.shape
 
-            noise = torch.randn_like(model_input)
-            timesteps = torch.tensor([noise_timestep], device=noise.device)
-            noisy_model_input = scheduler.add_noise(model_input, noise, timesteps)
+                noise = torch.randn_like(model_input)
+                timesteps = torch.tensor([noise_timestep], device=noise.device)
+                noisy_model_input = scheduler.add_noise(model_input, noise, timesteps)
 
-            vae_scale_factor_spatial = 2 ** (len(vae.config.block_out_channels) - 1)
+                vae_scale_factor_spatial = 2 ** (len(vae.config.block_out_channels) - 1)
 
-            image_rotary_emb = (
-                prepare_rotary_positional_embeddings(
-                    height=height,
-                    width=width,
-                    num_frames=num_frames,
-                    vae_scale_factor_spatial=vae_scale_factor_spatial,
-                    patch_size=transformer.config.patch_size,
-                    attention_head_dim=transformer.config.attention_head_dim,
-                    device="cuda",
+                image_rotary_emb = (
+                    prepare_rotary_positional_embeddings(
+                        height=height,
+                        width=width,
+                        num_frames=num_frames,
+                        vae_scale_factor_spatial=vae_scale_factor_spatial,
+                        patch_size=transformer.config.patch_size,
+                        attention_head_dim=transformer.config.attention_head_dim,
+                        device="cuda",
+                    )
+                    if transformer.config.use_rotary_positional_embeddings
+                    else None
                 )
-                if transformer.config.use_rotary_positional_embeddings
-                else None
-            )
 
-            prompt_embeds = get_t5_prompt_embeds(
-                tokenizer,
-                text_encoder,
-                prompt,
-                device=text_encoder.device,
-                dtype=text_encoder.dtype,
-            )
+                prompt_embeds = get_t5_prompt_embeds(
+                    tokenizer,
+                    text_encoder,
+                    prompt,
+                    device=text_encoder.device,
+                    dtype=text_encoder.dtype,
+                )
 
-            prompt_embeds = prompt_embeds.to(transformer.dtype)
+                prompt_embeds = prompt_embeds.to(transformer.dtype)
 
-            transformer.forward = forward.__get__(transformer, transformer.__class__)
+                transformer.forward = forward.__get__(transformer, transformer.__class__)
 
-            height = transformer.config.sample_height // transformer.config.patch_size
-            width = transformer.config.sample_width // transformer.config.patch_size
-            frames = transformer.config.sample_frames // transformer.config.temporal_compression_ratio + 1
-            dim = transformer.config.num_attention_heads * transformer.config.attention_head_dim
+                height = transformer.config.sample_height // transformer.config.patch_size
+                width = transformer.config.sample_width // transformer.config.patch_size
+                frames = transformer.config.sample_frames // transformer.config.temporal_compression_ratio + 1
+                dim = transformer.config.num_attention_heads * transformer.config.attention_head_dim
 
-            store = {}
-            attn_processors = {}
-            for key, value in transformer.attn_processors.items():
-                block_idx = int(key.split(".")[1])
-                if block_idx in list(range(0, 15)):
-                    attn_processor = SkipConv1dCogVideoXAttnProcessor2_0(
-                        height=height, 
-                        width=width, 
-                        frames=frames, 
-                        dim=dim, 
-                        rank=128,
-                        kernel_size=3,
-                        module_type="conv1d",
-                        store=store,
-                        block_index=str(block_idx)
-                    ).to(dtype=transformer.dtype, device="cuda")
-                    attn_processors[key] = attn_processor
-                else:
-                    attn_processors[key] = value
+                store = {}
+                attn_processors = {}
+                for key, value in transformer.attn_processors.items():
+                    block_idx = int(key.split(".")[1])
+                    if block_idx in list(range(0, 15)):
+                        attn_processor = SkipConv1dCogVideoXAttnProcessor2_0(
+                            height=height, 
+                            width=width, 
+                            frames=frames, 
+                            dim=dim, 
+                            rank=128,
+                            kernel_size=3,
+                            module_type="conv1d",
+                            store=store,
+                            block_index=str(block_idx)
+                        ).to(dtype=transformer.dtype, device="cuda")
+                        attn_processors[key] = attn_processor
+                    else:
+                        attn_processors[key] = value
 
-            transformer.set_attn_processor(attn_processors)
+                transformer.set_attn_processor(attn_processors)
 
-            model_output = transformer(
-                hidden_states=noisy_model_input,    # [B, F, C, H, W]
-                encoder_hidden_states=prompt_embeds,
-                timestep=timesteps,
-                image_rotary_emb=image_rotary_emb,
-                return_dict=True,
-                intermediate_layer=intermediate_layer,
-            )
+                model_output = transformer(
+                    hidden_states=noisy_model_input,    # [B, F, C, H, W]
+                    encoder_hidden_states=prompt_embeds,
+                    timestep=timesteps,
+                    image_rotary_emb=image_rotary_emb,
+                    return_dict=True,
+                    intermediate_layer=intermediate_layer,
+                )
 
-            intermediate = model_output.intermediate.to(torch.float32)    # [B, F, H, W, C]
-            intermediate = intermediate[-1]  # [F, H, W, C]
-            t, h, w, c = intermediate.shape
-            save_tensor_as_images(intermediate, root=f"visualization/dit_feature/denoising/{file_name}")
+                intermediate = model_output.intermediate.to(torch.float32)    # [B, F, H, W, C]
+                intermediate = intermediate[-1]  # [F, H, W, C]
+                t, h, w, c = intermediate.shape
+                save_tensor_as_images(intermediate, root=f"visualization/dit_feature/denoising/{file_name}")
 
-            for key, value in store.items():
-                value = value.to(torch.float32)
-                root = f"visualization/dit_feature/denoising/{file_name}/" + f"block_{key}"
-                save_tensor_as_images(intermediate=value, root=root)
+                for key, value in store.items():
+                    value = value.to(torch.float32)
+                    root = f"visualization/dit_feature/denoising/{file_name}/" + f"block_{key}"
+                    torch.save(value, f"{key}.pth")
+                    save_tensor_as_images(intermediate=value, root=root)
