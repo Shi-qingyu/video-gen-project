@@ -2,8 +2,10 @@ attention_map
 checkpoints
 outputs
 outputs_benchmark
+organized_outputs
 data
 MTBench_subset
+demo
 
 cache
 .vscode
