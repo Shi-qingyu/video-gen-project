@@ -167,7 +167,7 @@ def motion_fidelity(data_root, gen_root, offline_cotracker_model_path, device="c
                             frechet_similarity_matrix = torch.from_numpy(frechet_similarity_matrix).to(cosine_similarity_matrix.device)
 
                             # for each row find the most similar element
-                            max_similarity = 0.8 * cosine_similarity_matrix.max(dim=1)[0].mean() + 0.2 * frechet_similarity_matrix.max(dim=1)[0].mean()
+                            max_similarity = 0.5 * cosine_similarity_matrix.max(dim=1)[0].mean() + 0.5 * frechet_similarity_matrix.max(dim=1)[0].mean()
                         else:
                             max_similarity, _ = cosine_similarity_matrix.max(dim=1)
 
@@ -298,4 +298,12 @@ def MTBench(benchmark_root, generated_video_root):
 
 
 if __name__ == "__main__":
-    MTBench("./data", "outputs_benchmark/results_MotionClone")
+    import gc
+
+    difficulties = ["hard", "medium", "easy"]
+    with torch.no_grad():
+        for difficulty in difficulties:
+            MTBench(f"MTBench_subset/MTBench_{difficulty}", f"outputs_benchmark/lr_1e-5_skipconv1d_kernel_3_mid_128_gas_1_mse_1.0_tracking_loss_1e-1/{difficulty}")
+
+            gc.collect()
+            torch.cuda.empty_cache()
