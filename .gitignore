@@ -6,6 +6,7 @@ organized_outputs
 data
 MTBench_subset
 demo
+failed_code
 
 cache
 .vscode
