@@ -171,8 +171,8 @@ class MyCogVideoXPipeline(CogVideoXPipeline):
                     encoder_hidden_states=prompt_embeds,
                     timestep=timestep,
                     image_rotary_emb=image_rotary_emb,
-                    attention_kwargs=attention_kwargs,
-                    motion_module_kwargs=motion_module_kwargs,
+                    # attention_kwargs=attention_kwargs,
+                    # motion_module_kwargs=motion_module_kwargs,
                     return_dict=False,
                 )[0]
                 noise_pred = noise_pred.float()

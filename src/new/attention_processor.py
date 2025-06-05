@@ -597,6 +597,83 @@ class SkipConv1dLTXVideoAttentionProcessor2_0(nn.Module):
         hidden_states = attn.to_out[1](hidden_states)
 
         return hidden_states + hidden_states_conv1d
+    
+
+class SkipConv1dWanVideoAttentionProcessor2_0(nn.Module):
+    r"""
+    Processor for implementing scaled dot-product attention (enabled by default if you're using PyTorch 2.0). This is
+    used in the LTX model. It applies a normalization layer and rotary embedding on the query and key vector.
+    """
+    def __init__(self, height, width, frames, dim, rank=128, kernel_size=3, module_type="conv1d"):
+        super().__init__()
+        self.height = height
+        self.width = width
+        self.frames = frames
+        self.dim = dim
+
+        if module_type == "conv1d":
+            self.temporal_emb = Conv1DModule(input_channels=dim, mid_channels=rank, kernel_size=kernel_size)
+        elif module_type == "mlp":
+            self.temporal_emb = MLPModule(input_channels=dim, mid_channels=rank)
+
+
+    def __call__(
+        self,
+        attn: Attention,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        rotary_emb: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        batch_size, sequence_length, _ = (
+            hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
+        )
+
+        if attention_mask is not None:
+            attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
+            attention_mask = attention_mask.view(batch_size, attn.heads, -1, attention_mask.shape[-1])
+
+        if encoder_hidden_states is None:
+            encoder_hidden_states = hidden_states
+        
+        hidden_states_conv1d = hidden_states.reshape(-1, self.frames, self.height, self.width, self.dim)
+        hidden_states_conv1d = hidden_states_conv1d.permute(0, 2, 3, 4, 1).flatten(0, 2)
+        hidden_states_conv1d = self.temporal_emb(hidden_states_conv1d)
+        hidden_states_conv1d = hidden_states_conv1d.reshape(-1, self.height, self.width, self.dim, self.frames)
+        hidden_states_conv1d = hidden_states_conv1d.permute(0, 4, 1, 2, 3)
+        hidden_states_conv1d = hidden_states_conv1d.flatten(1, 3)
+
+        query = attn.to_q(hidden_states)
+        key = attn.to_k(encoder_hidden_states)
+        value = attn.to_v(encoder_hidden_states)
+
+        query = attn.norm_q(query)
+        key = attn.norm_k(key)
+
+        query = query.unflatten(2, (attn.heads, -1)).transpose(1, 2)
+        key = key.unflatten(2, (attn.heads, -1)).transpose(1, 2)
+        value = value.unflatten(2, (attn.heads, -1)).transpose(1, 2)
+
+        if rotary_emb is not None:
+
+            def apply_rotary_emb(hidden_states: torch.Tensor, freqs: torch.Tensor):
+                x_rotated = torch.view_as_complex(hidden_states.to(torch.float64).unflatten(3, (-1, 2)))
+                x_out = torch.view_as_real(x_rotated * freqs).flatten(3, 4)
+                return x_out.type_as(hidden_states)
+
+            query = apply_rotary_emb(query, rotary_emb)
+            key = apply_rotary_emb(key, rotary_emb)
+
+        hidden_states = F.scaled_dot_product_attention(
+            query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+        )
+        hidden_states = hidden_states.transpose(1, 2).flatten(2, 3)
+        hidden_states = hidden_states.to(query.dtype)
+
+        hidden_states = attn.to_out[0](hidden_states)
+        hidden_states = attn.to_out[1](hidden_states)
+
+        return hidden_states + hidden_states_conv1d
 
 
 class SkipConv1dHunyuanVideoAttnProcessor2_0(nn.Module):
@@ -720,3 +797,85 @@ def apply_rotary_emb(x, freqs):
     x_rotated = torch.stack([-x_imag, x_real], dim=-1).flatten(2)
     out = (x.float() * cos + x_rotated.float() * sin).to(x.dtype)
     return out
+
+
+class MotionInversionCogVideoXAttnProcessor2_0(nn.Module):
+    def __init__(self, height, width, frames, dim, rank=128, kernel_size=3, module_type="conv1d", **kwargs):
+        super().__init__()
+        self.height = height
+        self.width = width
+        self.frames = frames
+        self.dim = dim
+
+        self.appearance_emb = nn.Parameter(torch.zeros(size=(height, width, dim)))
+        self.motion_emb = nn.Parameter(torch.zeros(size=(frames, dim)))
+
+    def __call__(
+        self,
+        attn: Attention,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        image_rotary_emb: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        text_seq_length = encoder_hidden_states.size(1)
+
+        hidden_states_qk = hidden_states.reshape(-1, self.frames, self.height, self.width, self.dim)
+        hidden_states_v = hidden_states.reshape(-1, self.frames, self.height, self.width, self.dim)
+
+        hidden_states_qk = hidden_states_qk + self.motion_emb.reshape(1, self.frames, 1, 1, self.dim)
+        hidden_states_qk = hidden_states_qk.flatten(1, 3)
+
+        hidden_states_v = hidden_states_v + self.appearance_emb.reshape(1, 1, self.height, self.width, self.dim)
+        hidden_states_v = hidden_states_v.flatten(1, 3)
+
+        hidden_states_qk = torch.cat([encoder_hidden_states, hidden_states_qk], dim=1)
+        hidden_states_v = torch.cat([encoder_hidden_states, hidden_states_v], dim=1)
+
+        batch_size, sequence_length, _ = (
+            hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
+        )
+
+        if attention_mask is not None:
+            attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
+            attention_mask = attention_mask.view(batch_size, attn.heads, -1, attention_mask.shape[-1])
+
+        query = attn.to_q(hidden_states_qk)
+        key = attn.to_k(hidden_states_qk)
+        value = attn.to_v(hidden_states_v)
+
+        inner_dim = key.shape[-1]
+        head_dim = inner_dim // attn.heads
+
+        query = query.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
+        key = key.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
+        value = value.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
+
+        if attn.norm_q is not None:
+            query = attn.norm_q(query)
+        if attn.norm_k is not None:
+            key = attn.norm_k(key)
+
+        # Apply RoPE if needed
+        if image_rotary_emb is not None:
+            from diffusers.models.embeddings import apply_rotary_emb
+
+            query[:, :, text_seq_length:] = apply_rotary_emb(query[:, :, text_seq_length:], image_rotary_emb)
+            if not attn.is_cross_attention:
+                key[:, :, text_seq_length:] = apply_rotary_emb(key[:, :, text_seq_length:], image_rotary_emb)
+
+        hidden_states = F.scaled_dot_product_attention(
+            query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+        )
+
+        hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
+
+        # linear proj
+        hidden_states = attn.to_out[0](hidden_states)
+        # dropout
+        hidden_states = attn.to_out[1](hidden_states)
+
+        encoder_hidden_states, hidden_states = hidden_states.split(
+            [text_seq_length, hidden_states.size(1) - text_seq_length], dim=1
+        )
+        return hidden_states, encoder_hidden_states
